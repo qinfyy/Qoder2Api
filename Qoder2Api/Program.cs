@@ -67,7 +67,7 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 QoderConstants.ReloadModels(
-    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("reg.Services.Qoder.QoderConstants"));
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Qoder2Api.Services.Qoder.QoderConstants"));
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
