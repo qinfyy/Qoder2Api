@@ -2,7 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace reg.Models;
 
-/// <summary>账号在池中的可用状态（供 UI 与 /api/pool/status 展示）。</summary>
 public enum PoolAccountState
 {
     /// <summary>健康可用。</summary>
@@ -24,9 +23,6 @@ public enum PoolAccountState
     Disabled,
 }
 
-/// <summary>
-/// 单个账号的池状态快照。脱敏——**不含任何凭证字段**，可安全地透给前端与 REST 接口。
-/// </summary>
 public sealed class PoolAccountStatus
 {
     public string AccountId { get; set; } = "";

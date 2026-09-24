@@ -63,12 +63,6 @@
     </div>
 
     <div class="metric-box">
-        <div class="metric-label">存储引擎</div>
-        <div class="metric-value" style="font-size: 1.15rem; font-family: var(--font-mono);">./save/qoder2api.db</div>
-        <div class="metric-sub">EF Core · SQLite 存储</div>
-    </div>
-
-    <div class="metric-box">
         <div class="metric-label">下游调用防护</div>
         <div class="metric-value">
             @(AuthService.RequireApiKey ? "已启用 Key 校验" : "公开免密")

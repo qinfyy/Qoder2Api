@@ -1,5 +1,9 @@
-using Microsoft.Extensions.Logging;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.Logging;
+using reg.Models;
+using reg.Services.Qoder;
 
 namespace reg.Services.Database;
 
@@ -8,8 +12,8 @@ public static class SchemaPatches
     public static void Apply(AppDbContext db, ILogger? log = null)
     {
         ApplyPragmas(db, log);
-        CreatePoolStateTable(db);
-        AddUsageColumns(db);
+        EnsureTable<PoolStateRecord>(db, log);
+        SyncMissingColumns<UsageRecord>(db, log);
     }
 
     private static void ApplyPragmas(AppDbContext db, ILogger? log)
@@ -21,75 +25,129 @@ public static class SchemaPatches
         }
         catch (Exception ex)
         {
-            // 不阻断启动：极端情况下（如只读介质）退化为默认模式仍可运行。
+            // 不阻断启动：只读介质等场景退化为默认 journal 模式仍可运行。
             log?.LogWarning(ex, "PRAGMA 设置失败，将使用默认 journal 模式");
         }
     }
 
-    private static void CreatePoolStateTable(AppDbContext db)
+    private static void EnsureTable<TEntity>(AppDbContext db, ILogger? log)
     {
-        db.Database.ExecuteSqlRaw("""
-            CREATE TABLE IF NOT EXISTS account_pool_states (
-                account_id           TEXT    NOT NULL PRIMARY KEY,
-                disabled             INTEGER NOT NULL DEFAULT 0,
-                disabled_reason      TEXT    NULL,
-                needs_relogin        INTEGER NOT NULL DEFAULT 0,
-                needs_relogin_reason TEXT    NULL,
-                cool_until_ms        INTEGER NULL,
-                cool_kind            INTEGER NOT NULL DEFAULT 0,
-                cool_reason          TEXT    NULL,
-                breaker_until_ms     INTEGER NULL,
-                breaker_fails        INTEGER NOT NULL DEFAULT 0,
-                breaker_retry_count  INTEGER NOT NULL DEFAULT 0,
-                degrade_until_ms     INTEGER NULL,
-                consecutive_fails    INTEGER NOT NULL DEFAULT 0,
-                soft_streak          INTEGER NOT NULL DEFAULT 0,
-                session_dead_fails   INTEGER NOT NULL DEFAULT 0,
-                success_count        INTEGER NOT NULL DEFAULT 0,
-                err_total            INTEGER NOT NULL DEFAULT 0,
-                success_ema          REAL    NOT NULL DEFAULT 0.5,
-                last_success_ms      INTEGER NULL,
-                last_err_ms          INTEGER NULL,
-                model_cooldowns_json TEXT    NULL,
-                updated_at_ms        INTEGER NOT NULL DEFAULT 0
-            );
-            """);
-    }
-
-    private static void AddUsageColumns(AppDbContext db)
-    {
-        var existing = ReadColumnNames(db, "usage_records");
-        if (existing.Count == 0)
+        var entityType = db.Model.FindEntityType(typeof(TEntity));
+        if (entityType is null)
         {
-            return; // 表还不存在（EnsureCreated 失败等），跳过
+            return;
         }
 
-        // (列名, 定义) —— 新增字段一律追加在此，历史条目按默认值回填。
-        var wanted = new (string Name, string Ddl)[]
+        string table = entityType.GetTableName()!;
+        if (TableExists(db, table))
         {
-            ("CachedTokens", "INTEGER NOT NULL DEFAULT 0"),
-            ("Credits", "REAL NOT NULL DEFAULT 0"),
-            ("UsageSource", "TEXT NULL"),
-            ("AccountUid", "TEXT NULL"),
-            ("FirstTokenMs", "INTEGER NOT NULL DEFAULT 0"),
-        };
+            return;
+        }
 
-        foreach (var (name, ddl) in wanted)
+        db.Database.ExecuteSqlRaw(BuildCreateTable(entityType, table));
+        log?.LogInformation("已按模型补建表 {Table}", table);
+    }
+
+    private static void SyncMissingColumns<TEntity>(AppDbContext db, ILogger? log)
+    {
+        var entityType = db.Model.FindEntityType(typeof(TEntity));
+        if (entityType is null)
         {
-            if (existing.Contains(name))
+            return;
+        }
+
+        string table = entityType.GetTableName()!;
+        var existing = ReadColumnNames(db, table);
+        if (existing.Count == 0)
+        {
+            return; // 表还不存在，EnsureCreated 会整表建好
+        }
+
+        var store = StoreObjectIdentifier.Table(table, entityType.GetSchema());
+        foreach (var prop in entityType.GetProperties())
+        {
+            string column = prop.GetColumnName(store) ?? prop.Name;
+            if (existing.Contains(column))
             {
                 continue;
             }
-            // EF1002 的插值告警在此不适用：name/ddl 全部来自上方编译期常量数组，
-            // 不含任何外部输入。SQLite 的 ALTER TABLE 也不支持参数化列名，
-            // 没有"改用 ExecuteSql"的替代方案。
+
+            string ddl = BuildAddColumn(prop, column, store);
 #pragma warning disable EF1002
-            db.Database.ExecuteSqlRaw($"ALTER TABLE usage_records ADD COLUMN {name} {ddl};");
+            db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {ddl};");
 #pragma warning restore EF1002
+            log?.LogInformation("已给 {Table} 补列 {Column}", table, column);
         }
     }
 
-    /// <summary>读取表的现有列名（大小写不敏感比较，用 OrdinalIgnoreCase 集合）。</summary>
+    private static string BuildCreateTable(IEntityType entityType, string table)
+    {
+        var store = StoreObjectIdentifier.Table(table, entityType.GetSchema());
+        var columns = entityType.GetProperties().Select(p =>
+        {
+            var sb = new StringBuilder("    ");
+            sb.Append(p.GetColumnName(store)).Append(' ').Append(ColumnType(p, store));
+            if (!p.IsNullable)
+            {
+                sb.Append(" NOT NULL");
+            }
+            if (p.IsPrimaryKey())
+            {
+                sb.Append(" PRIMARY KEY");
+            }
+            return sb.ToString();
+        });
+
+        return $"CREATE TABLE IF NOT EXISTS {table} (\n{string.Join(",\n", columns)}\n);";
+    }
+
+    private static string BuildAddColumn(IProperty prop, string column, StoreObjectIdentifier store)
+    {
+        var sb = new StringBuilder();
+        sb.Append(column).Append(' ').Append(ColumnType(prop, store));
+        if (!prop.IsNullable)
+        {
+            // 值类型（int/long/bool/double）的 CLR 默认值都是 0，与 EF 读缺失列的语义一致。
+            sb.Append(" NOT NULL DEFAULT 0");
+        }
+        return sb.ToString();
+    }
+
+    private static string ColumnType(IProperty prop, StoreObjectIdentifier store) =>
+        prop.GetColumnType(store) ?? prop.ClrType switch
+        {
+            var t when t == typeof(int) || t == typeof(long) || t == typeof(bool) => "INTEGER",
+            var t when t == typeof(double) || t == typeof(float) || t == typeof(decimal) => "REAL",
+            _ => "TEXT",
+        };
+
+    private static bool TableExists(AppDbContext db, string table)
+    {
+        var conn = db.Database.GetDbConnection();
+        bool opened = conn.State != System.Data.ConnectionState.Open;
+        if (opened)
+        {
+            conn.Open();
+        }
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "$name";
+            p.Value = table;
+            cmd.Parameters.Add(p);
+            return cmd.ExecuteScalar() is not null;
+        }
+        finally
+        {
+            if (opened)
+            {
+                conn.Close();
+            }
+        }
+    }
+
     private static HashSet<string> ReadColumnNames(AppDbContext db, string table)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -106,7 +164,6 @@ public static class SchemaPatches
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                // PRAGMA table_info 的列序：cid, name, type, notnull, dflt_value, pk
                 names.Add(reader.GetString(1));
             }
         }

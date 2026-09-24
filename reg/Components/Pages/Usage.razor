@@ -86,9 +86,6 @@
     <div class="card-title">
         <div>
             <h2 style="margin: 0; display: inline-block;">最近调用明细</h2>
-            <div class="muted" style="font-size: 0.8rem; font-weight: normal; margin-top: 0.25rem;">
-                由反代网关实时捕获并落库至 <code>./save/qoder2api.db</code>
-            </div>
         </div>
         <div class="row-actions">
             <button type="button" class="secondary" @onclick="ReloadData">
@@ -112,7 +109,7 @@
                     <th>缓存命中</th>
                     <th>首字延迟</th>
                     <th>总延迟</th>
-                    <th>账号</th>
+                    <th>供应商</th>
                     <th>状态</th>
                 </tr>
             </thead>
@@ -146,9 +143,8 @@
                         <td class="mono" style="color: var(--ok);">@(r.CachedTokens > 0 ? r.CachedTokens.ToString() : "—")</td>
                         <td class="mono" style="font-size: 0.8rem;">@(r.FirstTokenMs > 0 ? $"{r.FirstTokenMs} ms" : "—")</td>
                         <td class="mono">@(r.LatencyMs) ms</td>
-                        <td class="mono" style="font-size: 0.75rem; color: var(--muted);"
-                            title="@r.AccountUid">
-                            @ShortUid(r.AccountUid)
+                        <td class="supplier-cell" title="@SupplierTitle(r.AccountUid)">
+                            @SupplierName(r.AccountUid)
                         </td>
                         <td>
                             @if (r.Status == "success")
@@ -184,11 +180,57 @@
     private void ReloadData()
     {
         records = AuthService.Database.GetRecentUsage(100);
+        // 用量记录只存账号 Id，展示名要另查一次（每页一次，不是每请求一次）。
+        _supplierById = AuthService.Database.GetAllAccounts()
+            .ToDictionary(a => a.Id, BuildSupplier, StringComparer.Ordinal);
     }
 
-    /// <summary>账号 UID 缩写显示（完整值在 title 里）。</summary>
+    private Dictionary<string, Supplier> _supplierById = new(StringComparer.Ordinal);
+
+    /// <summary>邮箱优先（唯一且可读），其次用户名，最后 UID。悬停信息含三者全值。</summary>
+    private static Supplier BuildSupplier(AccountRecord a)
+    {
+        string email = (a.UserEmail ?? "").Trim();
+        string name = (a.UserName ?? "").Trim();
+
+        string label = email.Length > 0 ? email
+            : name.Length > 0 ? name
+            : a.Id;
+
+        var parts = new List<string>();
+        if (email.Length > 0) parts.Add(email);
+        if (name.Length > 0) parts.Add(name);
+        parts.Add(a.Id);
+        return new Supplier(label, string.Join(" · ", parts));
+    }
+
+    /// <summary>
+    /// 供应商列。邮箱优先——它比用户名更适合标识账号：用户名可能重复或为空，邮箱是唯一的。
+    /// 都没有则回落 UID（历史记录可能来自已删除的账号）。
+    /// </summary>
+    private string SupplierName(string? accountId)
+    {
+        if (string.IsNullOrEmpty(accountId))
+        {
+            return "—";
+        }
+        return _supplierById.TryGetValue(accountId, out var s) ? s.Label : ShortUid(accountId);
+    }
+
+    /// <summary>悬停显示完整信息：邮箱 + 用户名 + UID。</summary>
+    private string SupplierTitle(string? accountId)
+    {
+        if (string.IsNullOrEmpty(accountId))
+        {
+            return "";
+        }
+        return _supplierById.TryGetValue(accountId, out var s) ? s.Title : "已删除的账号 " + accountId;
+    }
+
     private static string ShortUid(string? uid) =>
         string.IsNullOrEmpty(uid) ? "—" : (uid.Length > 8 ? uid[..8] : uid);
+
+    private readonly record struct Supplier(string Label, string Title);
 
     private CancellationTokenSource? _toastCts;
 

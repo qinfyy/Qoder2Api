@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using reg.Models;
+using reg.Services.Qoder;
 
 namespace reg.Services.Database;
 
@@ -11,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<ApiKeyRecord> ApiKeys => Set<ApiKeyRecord>();
     public DbSet<UsageRecord> UsageRecords => Set<UsageRecord>();
     public DbSet<SettingItem> Settings => Set<SettingItem>();
+    public DbSet<PoolStateRecord> PoolStates => Set<PoolStateRecord>();
 
     public AppDbContext()
     {
@@ -66,6 +68,37 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("settings");
             entity.HasKey(e => e.Key);
+        });
+
+        modelBuilder.Entity<PoolStateRecord>(entity =>
+        {
+            entity.ToTable("account_pool_states");
+            entity.HasKey(e => e.AccountId);
+
+            // 列名显式映射为 snake_case：与既有库的物理列名保持一致，
+            // 改属性名时不会连带改表结构。
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.Disabled).HasColumnName("disabled");
+            entity.Property(e => e.DisabledReason).HasColumnName("disabled_reason");
+            entity.Property(e => e.NeedsRelogin).HasColumnName("needs_relogin");
+            entity.Property(e => e.NeedsReloginReason).HasColumnName("needs_relogin_reason");
+            entity.Property(e => e.CoolUntilMs).HasColumnName("cool_until_ms");
+            entity.Property(e => e.CoolKind).HasColumnName("cool_kind");
+            entity.Property(e => e.CoolReason).HasColumnName("cool_reason");
+            entity.Property(e => e.BreakerUntilMs).HasColumnName("breaker_until_ms");
+            entity.Property(e => e.BreakerFails).HasColumnName("breaker_fails");
+            entity.Property(e => e.BreakerRetryCount).HasColumnName("breaker_retry_count");
+            entity.Property(e => e.DegradeUntilMs).HasColumnName("degrade_until_ms");
+            entity.Property(e => e.ConsecutiveFails).HasColumnName("consecutive_fails");
+            entity.Property(e => e.SoftStreak).HasColumnName("soft_streak");
+            entity.Property(e => e.SessionDeadFails).HasColumnName("session_dead_fails");
+            entity.Property(e => e.SuccessCount).HasColumnName("success_count");
+            entity.Property(e => e.ErrTotal).HasColumnName("err_total");
+            entity.Property(e => e.SuccessEma).HasColumnName("success_ema");
+            entity.Property(e => e.LastSuccessMs).HasColumnName("last_success_ms");
+            entity.Property(e => e.LastErrMs).HasColumnName("last_err_ms");
+            entity.Property(e => e.ModelCooldownsJson).HasColumnName("model_cooldowns_json");
+            entity.Property(e => e.UpdatedAtMs).HasColumnName("updated_at_ms");
         });
     }
 

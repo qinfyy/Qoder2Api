@@ -280,177 +280,51 @@ public class SqliteDbService
         }
         db.SaveChanges();
     }
+    // --- 账号池状态 ---
+    // 由后台 flusher 独占写入（见 PoolFlusher），请求路径不碰这里。
 
     public Dictionary<string, PoolStateRecord> GetAllPoolStates()
     {
-        var result = new Dictionary<string, PoolStateRecord>(StringComparer.Ordinal);
         using var db = _factory.CreateDbContext();
-        var conn = db.Database.GetDbConnection();
-        bool opened = conn.State != System.Data.ConnectionState.Open;
-        if (opened)
-        {
-            conn.Open();
-        }
-        try
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                SELECT account_id, disabled, disabled_reason, needs_relogin, needs_relogin_reason,
-                       cool_until_ms, cool_kind, cool_reason, breaker_until_ms, breaker_fails,
-                       breaker_retry_count, degrade_until_ms, consecutive_fails, soft_streak,
-                       session_dead_fails, success_count, err_total, success_ema,
-                       last_success_ms, last_err_ms, model_cooldowns_json, updated_at_ms
-                FROM account_pool_states;
-                """;
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-            {
-                var rec = new PoolStateRecord
-                {
-                    AccountId = r.GetString(0),
-                    Disabled = r.GetInt32(1) != 0,
-                    DisabledReason = r.IsDBNull(2) ? null : r.GetString(2),
-                    NeedsRelogin = r.GetInt32(3) != 0,
-                    NeedsReloginReason = r.IsDBNull(4) ? null : r.GetString(4),
-                    CoolUntilMs = r.IsDBNull(5) ? null : r.GetInt64(5),
-                    CoolKind = r.GetInt32(6),
-                    CoolReason = r.IsDBNull(7) ? null : r.GetString(7),
-                    BreakerUntilMs = r.IsDBNull(8) ? null : r.GetInt64(8),
-                    BreakerFails = r.GetInt32(9),
-                    BreakerRetryCount = r.GetInt32(10),
-                    DegradeUntilMs = r.IsDBNull(11) ? null : r.GetInt64(11),
-                    ConsecutiveFails = r.GetInt32(12),
-                    SoftStreak = r.GetInt32(13),
-                    SessionDeadFails = r.GetInt32(14),
-                    SuccessCount = r.GetInt64(15),
-                    ErrTotal = r.GetInt64(16),
-                    SuccessEma = r.GetDouble(17),
-                    LastSuccessMs = r.IsDBNull(18) ? null : r.GetInt64(18),
-                    LastErrMs = r.IsDBNull(19) ? null : r.GetInt64(19),
-                    ModelCooldownsJson = r.IsDBNull(20) ? null : r.GetString(20),
-                    UpdatedAtMs = r.GetInt64(21),
-                };
-                result[rec.AccountId] = rec;
-            }
-        }
-        finally
-        {
-            if (opened)
-            {
-                conn.Close();
-            }
-        }
-        return result;
+        return db.PoolStates
+            .AsNoTracking()
+            .ToDictionary(s => s.AccountId, StringComparer.Ordinal);
     }
 
+    /// <summary>批量 upsert（单事务）。已存在的整行覆盖，不存在的新增。</summary>
     public void SavePoolStates(IReadOnlyList<PoolStateRecord> states)
     {
         if (states.Count == 0)
         {
             return;
         }
+
         using var db = _factory.CreateDbContext();
-        var conn = db.Database.GetDbConnection();
-        bool opened = conn.State != System.Data.ConnectionState.Open;
-        if (opened)
+        var ids = states.Select(s => s.AccountId).ToList();
+        var existing = db.PoolStates
+            .Where(s => ids.Contains(s.AccountId))
+            .ToDictionary(s => s.AccountId, StringComparer.Ordinal);
+
+        foreach (var state in states)
         {
-            conn.Open();
-        }
-        try
-        {
-            // 转成 Sqlite* 具体类型：DbCommand.Parameters 是 DbParameterCollection，
-            // 其 Add 走 IList.Add 返回 int；SqliteParameterCollection.Add(SqliteParameter)
-            // 才返回参数对象本身。Transaction 属性同理要求 SqliteTransaction。
-            using var sqliteConn = (Microsoft.Data.Sqlite.SqliteConnection)conn;
-            using var tx = sqliteConn.BeginTransaction();
-            using var cmd = sqliteConn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = """
-                INSERT OR REPLACE INTO account_pool_states (
-                    account_id, disabled, disabled_reason, needs_relogin, needs_relogin_reason,
-                    cool_until_ms, cool_kind, cool_reason, breaker_until_ms, breaker_fails,
-                    breaker_retry_count, degrade_until_ms, consecutive_fails, soft_streak,
-                    session_dead_fails, success_count, err_total, success_ema,
-                    last_success_ms, last_err_ms, model_cooldowns_json, updated_at_ms
-                ) VALUES (
-                    $id, $disabled, $disReason, $needsRelogin, $nrReason,
-                    $coolUntil, $coolKind, $coolReason, $breakerUntil, $breakerFails,
-                    $retryCount, $degradeUntil, $consecFails, $softStreak,
-                    $deadFails, $success, $errTotal, $ema,
-                    $lastSuccess, $lastErr, $modelJson, $updatedAt
-                );
-                """;
-
-            // SQLite 是动态类型，参数无需声明 SqliteType——按名字占位、逐行赋 Value 即可。
-            // 复用同一组参数对象（只改 Value）比每行重建命令快得多。
-            var p = cmd.Parameters;
-            Microsoft.Data.Sqlite.SqliteParameter Param(string name) =>
-                (Microsoft.Data.Sqlite.SqliteParameter)p.Add(new Microsoft.Data.Sqlite.SqliteParameter { ParameterName = name });
-
-            var pId = Param("$id");
-            var pDisabled = Param("$disabled");
-            var pDisReason = Param("$disReason");
-            var pNeedsRelogin = Param("$needsRelogin");
-            var pNrReason = Param("$nrReason");
-            var pCoolUntil = Param("$coolUntil");
-            var pCoolKind = Param("$coolKind");
-            var pCoolReason = Param("$coolReason");
-            var pBreakerUntil = Param("$breakerUntil");
-            var pBreakerFails = Param("$breakerFails");
-            var pRetryCount = Param("$retryCount");
-            var pDegradeUntil = Param("$degradeUntil");
-            var pConsecFails = Param("$consecFails");
-            var pSoftStreak = Param("$softStreak");
-            var pDeadFails = Param("$deadFails");
-            var pSuccess = Param("$success");
-            var pErrTotal = Param("$errTotal");
-            var pEma = Param("$ema");
-            var pLastSuccess = Param("$lastSuccess");
-            var pLastErr = Param("$lastErr");
-            var pModelJson = Param("$modelJson");
-            var pUpdatedAt = Param("$updatedAt");
-
-            foreach (var s in states)
+            if (existing.TryGetValue(state.AccountId, out var row))
             {
-                pId.Value = s.AccountId;
-                pDisabled.Value = s.Disabled ? 1 : 0;
-                pDisReason.Value = (object?)s.DisabledReason ?? DBNull.Value;
-                pNeedsRelogin.Value = s.NeedsRelogin ? 1 : 0;
-                pNrReason.Value = (object?)s.NeedsReloginReason ?? DBNull.Value;
-                pCoolUntil.Value = (object?)s.CoolUntilMs ?? DBNull.Value;
-                pCoolKind.Value = s.CoolKind;
-                pCoolReason.Value = (object?)s.CoolReason ?? DBNull.Value;
-                pBreakerUntil.Value = (object?)s.BreakerUntilMs ?? DBNull.Value;
-                pBreakerFails.Value = s.BreakerFails;
-                pRetryCount.Value = s.BreakerRetryCount;
-                pDegradeUntil.Value = (object?)s.DegradeUntilMs ?? DBNull.Value;
-                pConsecFails.Value = s.ConsecutiveFails;
-                pSoftStreak.Value = s.SoftStreak;
-                pDeadFails.Value = s.SessionDeadFails;
-                pSuccess.Value = s.SuccessCount;
-                pErrTotal.Value = s.ErrTotal;
-                pEma.Value = s.SuccessEma;
-                pLastSuccess.Value = (object?)s.LastSuccessMs ?? DBNull.Value;
-                pLastErr.Value = (object?)s.LastErrMs ?? DBNull.Value;
-                pModelJson.Value = (object?)s.ModelCooldownsJson ?? DBNull.Value;
-                pUpdatedAt.Value = s.UpdatedAtMs;
-                cmd.ExecuteNonQuery();
+                // SetValues 按映射逐列拷贝，省掉手写 22 个字段赋值。
+                db.Entry(row).CurrentValues.SetValues(state);
             }
-
-            tx.Commit();
-        }
-        finally
-        {
-            if (opened)
+            else
             {
-                conn.Close();
+                db.PoolStates.Add(state);
             }
         }
+
+        db.SaveChanges();
     }
 
+    /// <summary>删除账号时一并清掉池状态，避免残留行被下次同名 id 复用。</summary>
     public void DeletePoolState(string accountId)
     {
         using var db = _factory.CreateDbContext();
-        db.Database.ExecuteSqlRaw("DELETE FROM account_pool_states WHERE account_id = {0};", accountId);
+        db.PoolStates.Where(s => s.AccountId == accountId).ExecuteDelete();
     }
 }

@@ -1,6 +1,7 @@
 @page "/settings"
 @using reg.Services.Qoder
 @inject QoderAuthService AuthService
+@inject ModelCatalogRefresher CatalogRefresher
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @implements IDisposable
@@ -69,33 +70,35 @@
         <section class="card" style="margin: 0;">
             <div class="card-title">
                 <h2>下游调用鉴权保护</h2>
+                @* 开关与标题同排右侧：它是一个状态，不是需要单独占一行再配保存按钮的操作 *@
+                <label class="switch" title="@(requireApiKey ? "点击关闭保护" : "点击开启保护")">
+                    <input type="checkbox" @bind="requireApiKey" @bind:event="oninput" />
+                    <span class="switch-track"></span>
+                    <span class="switch-label">@(requireApiKey ? "已启用" : "已关闭")</span>
+                </label>
             </div>
 
             <p class="muted" style="font-size: 0.85rem; margin-top: 0;">
-                控制是否强制要求下游客户端在请求头提供有效的 API Key（在 “API Key” 页面维护）。
+                控制是否强制要求下游客户端在请求头提供有效的 API Key（在 “API Key” 页面维护）。改动立即生效，无需保存。
             </p>
 
-            <div class="stack">
-                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                    <input type="checkbox" @bind="requireApiKey" />
-                    <span style="font-weight: 600; font-size: 0.88rem;">强制要求 API Key 鉴权</span>
-                </label>
-
-                <div class="muted" style="font-size: 0.78rem;">
-                    @if (requireApiKey)
-                    {
-                        <span style="color: var(--ok);">● 已启用保护：下游客户端必须在请求头中携带有效的 Bearer Key，未授权将被拒绝。</span>
-                    }
-                    else
-                    {
-                        <span>○ 未启用保护：本机及局域网客户端可免密直接调用（可任意填写 sk-xxx）。</span>
-                    }
-                </div>
-
-                <div style="margin-top: 0.5rem;">
-                    <button type="button" class="primary" @onclick="SaveSettings">保存设置</button>
-                </div>
+            <div class="muted" style="font-size: 0.78rem;">
+                @if (requireApiKey)
+                {
+                    <span style="color: var(--ok);">● 已启用保护：下游客户端必须在请求头中携带有效的 Bearer Key，未授权将被拒绝。</span>
+                }
+                else
+                {
+                    <span>○ 未启用保护：本机及局域网客户端可免密直接调用（可任意填写 sk-xxx）。</span>
+                }
             </div>
+
+            @if (!string.IsNullOrEmpty(flashMessage))
+            {
+                <div style="font-size: 0.75rem; color: @(flashIsError ? "var(--danger)" : "var(--ok)");">
+                    @flashMessage
+                </div>
+            }
         </section>
     </div>
 
@@ -155,7 +158,11 @@
         </div>
         <div class="row-actions">
             <button type="button" class="secondary" style="font-size: 0.8rem;" @onclick="ReloadModelConfig">
-                🔄 重新加载 models.json
+                🔄 重新加载 models.xml
+            </button>
+            @* 倍率与错峰折扣是上游实时下发的，不在 models.xml 里维护，需要单独拉取 *@
+            <button type="button" class="primary" style="font-size: 0.8rem;" @onclick="SyncFromUpstream" disabled="@isSyncing">
+                @(isSyncing ? "同步中…" : "⬇ 同步上游倍率/折扣")
             </button>
         </div>
     </div>
@@ -166,6 +173,7 @@
                 <tr>
                     <th>模型名称 (DisplayName)</th>
                     <th>内部 Key</th>
+                    <th>倍率</th>
                     <th>特性</th>
                     <th>官方定位与描述</th>
                     <th>常用别名</th>
@@ -181,6 +189,33 @@
                         </td>
                         <td>
                             <code class="mono" style="font-size: 0.82rem;">@m.Key</code>
+                        </td>
+                        @* 倍率来自上游 /api/v2/model/list（price_factor），1 = 标准，越小越便宜 *@
+                        <td class="mono" style="white-space: nowrap;">
+                            @if (m.PriceFactor is { } pf)
+                            {
+                                <span style="color: @(pf < 1 ? "var(--ok)" : pf > 1 ? "var(--warn)" : "var(--muted)"); font-weight: 600;">
+                                    ×@pf.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                            @if (m.IsFree == true)
+                            {
+                                <span class="badge" style="background: #dcfce7; color: #15803d; font-size: 0.68rem;">免费</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(m.PromotionLabel))
+                            {
+                                <div style="font-size: 0.7rem; color: var(--warn); font-weight: 600; margin-top: 0.15rem;">
+                                    @m.PromotionLabel
+                                    @if (!string.IsNullOrWhiteSpace(m.PromotionWindow))
+                                    {
+                                        <span class="muted" style="font-weight: 400;"> @m.PromotionWindow</span>
+                                    }
+                                </div>
+                            }
                         </td>
                         <td>
                             <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
@@ -217,9 +252,32 @@
 </section>
 
 @code {
-    private bool requireApiKey = false;
     private string? flashMessage;
     private bool flashIsError = false;
+    private bool _requireApiKey;
+
+    private bool requireApiKey
+    {
+        get => _requireApiKey;
+        set
+        {
+            if (_requireApiKey == value)
+            {
+                return;
+            }
+            _requireApiKey = value;
+            try
+            {
+                AuthService.RequireApiKey = value;
+                ShowToast(value ? "已启用鉴权保护：下游请求需携带有效 API Key。" : "已关闭鉴权保护：下游请求将免密放行。");
+            }
+            catch (Exception ex)
+            {
+                _requireApiKey = !value; // 回滚 UI
+                ShowToast($"保存失败：{ex.Message}", isError: true);
+            }
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -267,12 +325,6 @@
         flashMessage = null;
     }
 
-    private void SaveSettings()
-    {
-        AuthService.RequireApiKey = requireApiKey;
-        ShowToast("系统设置已成功保存！");
-    }
-
     private async Task CopyText(string text)
     {
         await JS.InvokeVoidAsync("qoderHelper.copyText", text);
@@ -282,7 +334,31 @@
     private void ReloadModelConfig()
     {
         QoderConstants.ReloadModels();
-        ShowToast($"已重新加载 models.json！当前生效模型共 {QoderConstants.OfficialModels.Count} 款。");
+        ShowToast($"已重新加载 models.xml！当前生效模型共 {QoderConstants.OfficialModels.Count} 款。");
+    }
+
+    private bool isSyncing = false;
+
+    /// <summary>
+    /// 从上游拉取倍率与错峰折扣，写回 models.xml。
+    /// 直接调服务实例而非发 HTTP 请求——同进程内调用，省去一次自身往返。
+    /// </summary>
+    private async Task SyncFromUpstream()
+    {
+        isSyncing = true;
+        try
+        {
+            bool ok = await CatalogRefresher.TryRefreshAsync();
+            var snap = CatalogRefresher.Catalog.Last;
+            ShowToast(ok
+                ? $"已同步上游模型信息：{snap.Models.Count} 个模型的倍率与折扣已写入 models.xml。"
+                : $"同步失败：{snap.Error ?? "未知原因"}", isError: !ok);
+            StateHasChanged();
+        }
+        finally
+        {
+            isSyncing = false;
+        }
     }
 
     public void Dispose()

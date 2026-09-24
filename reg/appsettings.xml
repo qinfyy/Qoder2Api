@@ -70,4 +70,11 @@
     <PollRequestTimeout>00:00:30</PollRequestTimeout>
   </Queue>
 
+
+  <!-- 后台刷新周期。设为 0 关闭该项（改为纯手动）。 -->
+  <Refresh>
+    <!-- 模型目录（倍率 / 错峰折扣）同步周期。客户端自身是 2 分钟，服务端无需跟那么紧。 -->
+    <ModelCatalog>00:05:00</ModelCatalog>
+  </Refresh>
+
 </configuration>

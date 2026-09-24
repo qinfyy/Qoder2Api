@@ -20,18 +20,12 @@ public class ChatCompletionRequest
     [JsonPropertyName("max_tokens")]
     public int? MaxTokens { get; set; }
 
-    /// <summary>OpenAI 新参数名，与 max_tokens 等价（两者都给时以 max_tokens 为准）。</summary>
     [JsonPropertyName("max_completion_tokens")]
     public int? MaxCompletionTokens { get; set; }
 
     [JsonPropertyName("stream")]
     public bool? Stream { get; set; }
 
-    /// <summary>
-    /// 流式附加选项。OpenAI 契约：<c>include_usage=true</c> 时必须在 [DONE] **之前**
-    /// 发一个 <c>choices: []</c> + <c>usage</c> 的终止 chunk；缺省或 false 时**必须不发**。
-    /// 这不是优化而是契约——没请求 usage 的客户端收到那个 chunk 会当成异常数据。
-    /// </summary>
     [JsonPropertyName("stream_options")]
     public StreamOptions? StreamOptions { get; set; }
 
@@ -62,11 +56,9 @@ public class ChatCompletionRequest
     [JsonPropertyName("parallel_tool_calls")]
     public bool? ParallelToolCalls { get; set; }
 
-    /// <summary>客户端是否要求流式返回真实用量。</summary>
     [JsonIgnore]
     public bool IncludeUsage => StreamOptions?.IncludeUsage == true;
 
-    /// <summary>生效的最大输出 token 数（max_tokens 优先，回落 max_completion_tokens）。</summary>
     [JsonIgnore]
     public int? EffectiveMaxTokens => MaxTokens ?? MaxCompletionTokens;
 }
@@ -142,27 +134,15 @@ public class ModelItem
     public string OwnedBy { get; set; } = "qoder";
 }
 
-// ---------------------------------------------------------------------------
-// 用量
-// ---------------------------------------------------------------------------
-
-/// <summary>token 用量的来源，用于区分"实测"与"估算"——两者绝不能混为一谈。</summary>
 public enum UsageSource
 {
-    /// <summary>未知/未观测（哨兵：**不是** 0）。</summary>
     None = 0,
 
-    /// <summary>上游 SSE 给出的真实值。</summary>
     Upstream = 1,
 
-    /// <summary>本地估算（上游未给 usage 时的兜底）。</summary>
     Estimated = 2,
 }
 
-/// <summary>
-/// OpenAI 规范的 usage。哨兵原则：观测缺失留 null 而非 0——
-/// "测得 0" 与 "没观测到" 混同会伪造统计。序列化时 null 字段省略。
-/// </summary>
 public sealed class UsageInfo
 {
     [JsonPropertyName("prompt_tokens")]
@@ -180,19 +160,17 @@ public sealed class UsageInfo
     [JsonPropertyName("completion_tokens_details")]
     public CompletionTokensDetails? CompletionTokensDetails { get; set; }
 
-    /// <summary>Qoder 私有：本次请求的实际扣费。不属于 OpenAI 规范，但值得透出。</summary>
+    // Qoder 私有：本次请求的实际扣费。不属于 OpenAI 规范，但值得透出。
     [JsonPropertyName("credits")]
     public double? Credits { get; set; }
 
-    /// <summary>Qoder 私有：上游是否标记本次为计费请求。</summary>
+    // Qoder 私有：上游是否标记本次为计费请求。
     [JsonPropertyName("billable")]
     public bool? Billable { get; set; }
 
-    /// <summary>来源标记（非 OpenAI 字段，便于排查"这个数是真的还是估的"）。</summary>
     [JsonPropertyName("x_usage_source")]
     public string? Source { get; set; }
 
-    /// <summary>补全 total（上游偶有缺失时按 prompt+completion 相加）。</summary>
     public void EnsureTotal()
     {
         if (TotalTokens is null && PromptTokens is { } p && CompletionTokens is { } c)

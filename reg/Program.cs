@@ -43,6 +43,10 @@ builder.Services.AddSingleton<QoderProxyService>();
 
 builder.Services.Configure<QueueOptions>(builder.Configuration.GetSection(QueueOptions.SectionName));
 builder.Services.AddSingleton<QoderQueueClient>();
+builder.Services.AddSingleton<QoderModelCatalog>();
+builder.Services.Configure<RefreshIntervalOptions>(builder.Configuration.GetSection(RefreshIntervalOptions.SectionName));
+builder.Services.AddSingleton<ModelCatalogRefresher>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ModelCatalogRefresher>());
 
 builder.Services.Configure<PoolOptions>(builder.Configuration.GetSection(PoolOptions.SectionName));
 builder.Services.AddSingleton<QoderPool>();

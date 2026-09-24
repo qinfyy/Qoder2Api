@@ -18,7 +18,9 @@ public static class QoderConstants
     // Endpoints
     public const string ChatURLEncoded = "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1";
     public const string ChatURL = "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common";
-    public const string ModelListURL = "https://api3.qoder.sh/algo/api/v2/model/list";
+    // 模型目录。与排队端点同坑：必须带 /algo 前缀与 Encode=1
+    //（客户端 SDK 常量 YNA = "/api/v2/model/list?Encode=1"，前缀由 WASM 的 prepareRequest 补）。
+    public const string ModelListURL = "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1";
     public const string JobTokenExchangeURL = "https://openapi.qoder.sh/api/v1/jobToken/exchange";
     public const string DeviceJobTokenURL = "https://openapi.qoder.sh/api/v1/me/jobToken";
     public const string UserStatusURL = "https://openapi.qoder.sh/api/v3/user/status";
@@ -71,6 +73,29 @@ public static class QoderConstants
 
         [JsonPropertyName("aliases")]
         public List<string> Aliases { get; set; } = [];
+
+        /// <summary>
+        /// 上游下发的计费倍率（/api/v2/model/list 的 price_factor）。
+        /// 1 = 标准，&lt;1 = 更便宜。由 /api/models/sync 写入，models.xml 里可手改。
+        /// </summary>
+        [JsonPropertyName("price_factor")]
+        public double? PriceFactor { get; set; }
+
+        /// <summary>上游标记是否免费（is_free）。</summary>
+        [JsonPropertyName("is_free")]
+        public bool? IsFree { get; set; }
+
+        /// <summary>错峰折扣徽标，如「错峰 4 折」。有值即表示折扣进行中。</summary>
+        [JsonPropertyName("promotion_label")]
+        public string? PromotionLabel { get; set; }
+
+        /// <summary>折扣时段，如「22:00-08:00」。</summary>
+        [JsonPropertyName("promotion_window")]
+        public string? PromotionWindow { get; set; }
+
+        /// <summary>最近一次从上游同步的时间（Unix 毫秒），供 UI 展示新鲜度。</summary>
+        [JsonPropertyName("synced_at_ms")]
+        public long? SyncedAtMs { get; set; }
 
         public QoderModelDefinition() { }
 
@@ -199,10 +224,91 @@ public static class QoderConstants
                     .Select(a => a.Value.Trim())
                     .Where(a => a.Length > 0)
                     .ToList() ?? [],
+                PriceFactor = ParseDouble((string?)el.Element("priceFactor")),
+                IsFree = (string?)el.Element("isFree") is { } f ? ParseBool(f) : null,
+                PromotionLabel = (string?)el.Element("promotionLabel"),
+                PromotionWindow = (string?)el.Element("promotionWindow"),
+                SyncedAtMs = ParseLong((string?)el.Element("syncedAtMs")),
             });
         }
         return list;
     }
+
+    /// <summary>
+    /// 把上游模型目录的动态信息（倍率 / 是否免费 / 错峰折扣）合并进 models.xml。
+    ///
+    /// **只更新已有的 key，不新增模型**：models.xml 里的别名与描述是人工维护的，
+    /// 上游目录没有这些信息，盲目新增会造出缺别名、缺描述的半成品条目。
+    /// 上游若出现了我们不知道的新模型，返回未匹配数，由人工补进 XML。
+    /// </summary>
+    /// <returns>被更新的模型数。</returns>
+    public static int MergeUpstreamCatalog(IReadOnlyList<ModelCatalogEntry> upstream, ILogger? log = null)
+    {
+        if (upstream.Count == 0)
+        {
+            return 0;
+        }
+        var mapped = upstream.Select(u => new QoderModelDefinition
+        {
+            Key = u.Key,
+            PriceFactor = u.PriceFactor,
+            IsFree = u.IsFree,
+            PromotionLabel = u.PromotionLabel,
+            PromotionWindow = u.PromotionWindow,
+        }).ToList();
+        return MergeCore(mapped, log);
+    }
+
+    private static int MergeCore(IReadOnlyList<QoderModelDefinition> upstream, ILogger? log)
+    {
+        lock (ModelLock)
+        {
+            var current = OfficialModels;
+            var byKey = current.ToDictionary(m => m.Key, StringComparer.Ordinal);
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            int updated = 0;
+            var unknown = new List<string>();
+
+            foreach (var u in upstream)
+            {
+                if (!byKey.TryGetValue(u.Key, out var target))
+                {
+                    unknown.Add(u.Key);
+                    continue;
+                }
+                target.PriceFactor = u.PriceFactor;
+                target.IsFree = u.IsFree;
+                target.PromotionLabel = u.PromotionLabel;
+                target.PromotionWindow = u.PromotionWindow;
+                target.SyncedAtMs = now;
+                updated++;
+            }
+
+            if (unknown.Count > 0)
+            {
+                log?.LogInformation("上游有 {Count} 个模型不在 models.xml 中，未自动新增：{Keys}",
+                    unknown.Count, string.Join(", ", unknown));
+            }
+
+            try
+            {
+                SaveToXml(ModelConfigPath, current);
+            }
+            catch (Exception ex)
+            {
+                log?.LogWarning(ex, "写回 models.xml 失败（内存已更新，重启后会丢失）");
+            }
+
+            return updated;
+        }
+    }
+
+    private static double? ParseDouble(string? s) =>
+        double.TryParse(s, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private static long? ParseLong(string? s) =>
+        long.TryParse(s, out var v) && v > 0 ? v : null;
 
     private static void SaveToXml(string path, List<QoderModelDefinition> models)
     {
@@ -216,7 +322,14 @@ public static class QoderConstants
                     new XElement("isReasoning", m.IsReasoning ? "true" : "false"),
                     new XElement("isVl", m.IsVl ? "true" : "false"),
                     new XElement("maxInputTokens", m.MaxInputTokens),
-                    new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a)))))));
+                    new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a))),
+                    // 动态信息（由 /api/models/sync 从上游写入），无值时不写元素
+                    m.PriceFactor is { } pf ? new XElement("priceFactor",
+                        pf.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
+                    m.IsFree is { } free ? new XElement("isFree", free ? "true" : "false") : null,
+                    string.IsNullOrWhiteSpace(m.PromotionLabel) ? null : new XElement("promotionLabel", m.PromotionLabel),
+                    string.IsNullOrWhiteSpace(m.PromotionWindow) ? null : new XElement("promotionWindow", m.PromotionWindow),
+                    m.SyncedAtMs is { } sync ? new XElement("syncedAtMs", sync) : null))));
 
         doc.Save(path);
     }

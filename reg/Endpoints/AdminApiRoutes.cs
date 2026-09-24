@@ -16,6 +16,21 @@ public static class AdminApiRoutes
         /// 号池总览 + 各账号的池状态台账（脱敏：不含任何凭证字段）。
         app.MapGet("/api/pool/status", (QoderPool pool) => Results.Ok(pool.Snapshot()));
 
+        /// 向上游拉取模型目录（倍率 / 是否免费 / 错峰折扣），合并进 models.xml 落盘。
+        app.MapPost("/api/models/sync", async (ModelCatalogRefresher refresher, CancellationToken ct) =>
+        {
+            bool ok = await refresher.TryRefreshAsync(ct);
+            return ok
+                ? Results.Ok(new
+                  {
+                      success = true,
+                      fetchedAt = refresher.Catalog.Last.FetchedAt,
+                      upstreamCount = refresher.Catalog.Last.Models.Count,
+                      path = QoderConstants.ModelConfigPath,
+                  })
+                : Results.Ok(new { success = false, error = refresher.Catalog.Last.Error ?? "拉取失败" });
+        });
+
         /// 解冻：清空该账号的全部惩罚状态（冷却/熔断/降权/自动禁用），立刻回池。
         app.MapPost("/api/pool/accounts/{id}/revive", (string id, QoderPool pool) =>
         {
