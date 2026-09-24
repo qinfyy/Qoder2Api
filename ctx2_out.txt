@@ -1,0 +1,11 @@
+========================================================================
+错误表之前 400 字符（找变量名）
+========================================================================
+import{aT as M,aU as q}from"./chatSessionSearchProjection-BfasVPhE.js";const j=JSON.parse(`{"101":{"title":{"en-US":"Request verification failed","zh-C
+
+========================================================================
+错误表之后 1200 字符（找导出名/使用点）
+========================================================================
+`),Y={title:{"en-US":"Something went wrong","zh-CN":"出了点问题"},actions:[{id:"retry",role:"primary",label:{"en-US":"Retry","zh-CN":"重试"}}],message:{"en-US":"An unexpected error occurred. Please try again, or start a new task if the issue persists. You can also report this issue via the feedback button in the bottom-right corner.","zh-CN":"发生了意外错误，请重试。如问题持续存在，可尝试新建任务，或点击右下角反馈按钮向我们报告。"}},F="20260917T023027Z",K={error:j,fallback:Y,revision:F},B=JSON.parse(`{"CHAT_ATTACHMENT_LIMIT_EXCEEDED":{"title":{"zh-CN":"附件数量超限","en-US":"Attachment limit exceeded"},"message":{"zh-CN":"最多只支持 20 个附件。","en-US":"A maximum of 20 attachments is supported."},"actions":[]},"CHAT_SESSION_WORKSPACE_UNAVAILABLE":{"title":{"zh-CN":"工作区不可用","en-US":"Workspace unavailable"},"message":{"zh-CN":"当前任务绑定的工作区已移动、删除或无法访问，无法继续执行。请在有效工作区中新建任务。","en-US":"The workspace linked to this task was moved, deleted, or is inaccessible. Start a new task in an available workspace to continue."},"actions":[{"id":"startNewTask","role":"primary","label":{"zh-CN":"新建任务","en-US":"Start new task"}}]},"CHAT_SESSION_HISTORY_MISSING":{"title":{"zh-CN":"会话历史缺失","en-US":"Session history missing"},"message":{"zh-CN":"此会话的执行历史文件不存在，暂时无法继续。已有消息会保留
+
+候选变量名: 未识别

@@ -1,0 +1,226 @@
+[
+  {
+    "key": "qmodel_38max",
+    "display_name": "Qwen3.8-Max",
+    "description": "千问最新一代基座模型，2.4 万亿参数，在代码工程、专业办公、深度推理等核心场景全面领先",
+    "is_reasoning": true,
+    "is_vl": true,
+    "max_input_tokens": 180000,
+    "aliases": [
+      "qwen3.8-max",
+      "qwen-3.8-max",
+      "qwen3.8max",
+      "qwen-max",
+      "qwen-max-latest"
+    ]
+  },
+  {
+    "key": "qfmodel",
+    "display_name": "Qwen3.8-Flash",
+    "description": "千问开源权重的多模态 MoE 模型，在能力、延迟与成本间取得出色平衡",
+    "is_reasoning": true,
+    "is_vl": true,
+    "max_input_tokens": 180000,
+    "aliases": [
+      "qwen3.8-flash",
+      "qwen-3.8-flash",
+      "qwen3.8flash",
+      "qwen-flash",
+      "qwen-flash-latest"
+    ]
+  },
+  {
+    "key": "qmodel_latest",
+    "display_name": "Qwen3.7-Max",
+    "description": "千问旗舰模型，具备顶尖智能体执行能力，可自主完成长达 35 小时的复杂任务",
+    "is_reasoning": true,
+    "is_vl": true,
+    "max_input_tokens": 180000,
+    "aliases": [
+      "qwen3.7-max",
+      "qwen-3.7-max",
+      "qwen3.7max"
+    ]
+  },
+  {
+    "key": "qmodel",
+    "display_name": "Qwen3.7-Plus",
+    "description": "千问旗舰模型，增强推理和智能体能力，擅长编程与复杂问题解决",
+    "is_reasoning": true,
+    "is_vl": true,
+    "max_input_tokens": 180000,
+    "aliases": [
+      "qwen3.7-plus",
+      "qwen-3.7-plus",
+      "qwen3.7plus",
+      "qwen-plus",
+      "qwen"
+    ]
+  },
+  {
+    "key": "dmodel",
+    "display_name": "DeepSeek-V4-Pro",
+    "description": "深度求索正式版模型（DeepSeek-V4-Pro-0813），Agent 能力、世界知识与推理性能全面领先。",
+    "is_reasoning": true,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "deepseek-v4-pro",
+      "deepseek-r1",
+      "deepseek-reasoner",
+      "deepseek-v4",
+      "r1"
+    ]
+  },
+  {
+    "key": "dfmodel",
+    "display_name": "DeepSeek-V4-Flash",
+    "description": "深度求索正式版模型（DeepSeek-V4-Flash-0731），Agent 能力、世界知识与推理性能全面领先。",
+    "is_reasoning": false,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "deepseek-v4-flash",
+      "deepseek-v3",
+      "deepseek-chat",
+      "v3"
+    ]
+  },
+  {
+    "key": "kmodel_latest",
+    "display_name": "Kimi-K3",
+    "description": "Kimi 迄今最强模型：2.8 万亿参数，面向软件工程、知识工作与深度推理而生",
+    "is_reasoning": true,
+    "is_vl": false,
+    "max_input_tokens": 200000,
+    "aliases": [
+      "kimi-k3",
+      "kimi-latest"
+    ]
+  },
+  {
+    "key": "kmodel",
+    "display_name": "Kimi-K2.7-Code",
+    "description": "专为长上下文编程打造：精准遵循指令，可靠执行长链路任务",
+    "is_reasoning": false,
+    "is_vl": false,
+    "max_input_tokens": 200000,
+    "aliases": [
+      "kimi-k2.7-code",
+      "kimi-k2.7",
+      "kimi-k2.5",
+      "kimi"
+    ]
+  },
+  {
+    "key": "gmodel",
+    "display_name": "GLM-5.3",
+    "description": "智谱旗舰模型，擅长复杂系统工程与长程任务",
+    "is_reasoning": true,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "glm-5.3",
+      "glm-5",
+      "glm-4",
+      "glm"
+    ]
+  },
+  {
+    "key": "gfmodel",
+    "display_name": "GLM-5.3-Flash",
+    "description": "智谱全新原生多模态模型，深度理解图像与视频，自主完成研究分析、文档制作等复杂任务",
+    "is_reasoning": false,
+    "is_vl": true,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "glm-5.3-flash",
+      "glm-flash"
+    ]
+  },
+  {
+    "key": "mmodel",
+    "display_name": "MiniMax-M3",
+    "description": "原生多模态感知、前沿编码能力与 1M 上下文，驾驭高复杂度工作流",
+    "is_reasoning": true,
+    "is_vl": true,
+    "max_input_tokens": 1000000,
+    "aliases": [
+      "minimax-m3",
+      "minimax",
+      "minimax-m2.5"
+    ]
+  },
+  {
+    "key": "cmodel",
+    "display_name": "Cantus",
+    "description": "尝鲜体验全球顶级模型，擅长超长自主任务执行",
+    "is_reasoning": true,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "cantus",
+      "cmodel"
+    ]
+  },
+  {
+    "key": "auto",
+    "display_name": "Auto",
+    "description": "智能选择最适合的模型，平衡性能与成本",
+    "is_reasoning": false,
+    "is_vl": true,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "default",
+      "qoder"
+    ]
+  },
+  {
+    "key": "ultimate",
+    "display_name": "Ultimate",
+    "description": "专家级深度推理与思考能力，极致输出质量。",
+    "is_reasoning": true,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "极致",
+      "qoder-ultimate"
+    ]
+  },
+  {
+    "key": "performance",
+    "display_name": "Performance",
+    "description": "高级推理能力，高质量输出",
+    "is_reasoning": false,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "性能",
+      "qoder-performance"
+    ]
+  },
+  {
+    "key": "efficient",
+    "display_name": "Efficient",
+    "description": "标准推理能力，高性价比",
+    "is_reasoning": false,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "经济",
+      "qoder-efficient"
+    ]
+  },
+  {
+    "key": "lite",
+    "display_name": "Lite",
+    "description": "基础推理能力，免费使用（高峰期可能响应较慢）",
+    "is_reasoning": false,
+    "is_vl": false,
+    "max_input_tokens": 128000,
+    "aliases": [
+      "轻量",
+      "qoder-lite"
+    ]
+  }
+]

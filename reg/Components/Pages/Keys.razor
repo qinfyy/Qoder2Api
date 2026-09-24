@@ -1,0 +1,282 @@
+@page "/keys"
+@using reg.Models
+@using reg.Services.Qoder
+@inject QoderAuthService AuthService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>API Key 管理 - Qoder2API 管理</PageTitle>
+
+@if (!string.IsNullOrEmpty(flashMessage))
+{
+    <div class="toast-container">
+        <div class="toast-notice @(flashIsError ? "toast-err" : "toast-ok")" role="alert">
+            <div class="toast-icon">
+                @if (flashIsError)
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" /></svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                }
+            </div>
+            <span class="toast-content">@flashMessage</span>
+            <button type="button" class="toast-close" @onclick="DismissToast" aria-label="关闭">
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+            </button>
+        </div>
+    </div>
+}
+
+<section class="card">
+    <div class="card-title">
+        <div>
+            <h2 style="margin: 0; display: inline-block;">下游 API Key 管理</h2>
+            <div class="muted" style="font-size: 0.8rem; font-weight: normal; margin-top: 0.25rem;">
+                用于给第三方客户端（如 Cursor、NextChat、Cherry Studio）分配独立的访问凭证。
+            </div>
+        </div>
+        <div class="row-actions">
+            <button type="button" class="primary" @onclick="OpenCreateDialog">
+                + 添加新 Key
+            </button>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Key 前缀</th>
+                    <th>名称</th>
+                    <th>绑定账户</th>
+                    <th>创建时间</th>
+                    <th>最近使用</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (keys.Count == 0)
+                {
+                    <tr>
+                        <td colspan="7" class="muted" style="text-align: center; padding: 2rem;">
+                            当前还没有生成任何 API Key。点击右上角“添加新 Key”进行创建。
+                        </td>
+                    </tr>
+                }
+                @foreach (var k in keys)
+                {
+                    var boundAccount = accounts.FirstOrDefault(a => a.Id == k.AccountId);
+                    <tr>
+                        <td class="mono" style="font-size: 0.82rem; font-weight: 600;">@k.KeyPrefix</td>
+                        <td>@k.Name</td>
+                        @* 三态区分。旧版把"绑定指向已删除账号"和"未绑定"都显示成
+                           （默认活跃账户），会让用户以为在用默认号，其实是悬空绑定。 *@
+                        <td>
+                            @if (string.IsNullOrEmpty(k.AccountId))
+                            {
+                                <span class="muted">未绑定（号池自动选号）</span>
+                            }
+                            else if (boundAccount != null)
+                            {
+                                <span>@(boundAccount.UserName ?? boundAccount.UserId)</span>
+                                <div class="muted" style="font-size: 0.7rem;">绑定优先，不可用时自动回落号池</div>
+                            }
+                            else
+                            {
+                                <span class="badge disabled" title="绑定的账号已被删除，该 Key 将自动回落为号池选号">
+                                    绑定已失效
+                                </span>
+                            }
+                        </td>
+                        <td style="font-size: 0.8rem; color: var(--muted);">@k.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td style="font-size: 0.8rem; color: var(--muted);">
+                            @(k.LastUsedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "从未使用")
+                        </td>
+                        <td>
+                            @if (k.Status == "active")
+                            {
+                                <span class="badge active">已启用</span>
+                            }
+                            else
+                            {
+                                <span class="badge pending">已暂停</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="row-actions">
+                                <button class="secondary" type="button" @onclick="() => CopyKey(k.KeyValue)">复制</button>
+                                <button class="secondary" type="button" @onclick="() => ToggleKey(k.Id)">
+                                    @(k.Status == "active" ? "暂停" : "启用")
+                                </button>
+                                <button class="danger" type="button" @onclick="() => DeleteKey(k.Id)">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Create Key Dialog Modal -->
+@if (isCreateOpen)
+{
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h2>
+                    <span>🔑</span>
+                    <span>添加新 API Key</span>
+                </h2>
+                <button type="button" class="modal-close-btn" @onclick="() => isCreateOpen = false" aria-label="关闭">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-field">
+                    <div class="form-field-label">
+                        <span>Key 名称</span>
+                        <span class="hint">用于区分用途或客户端</span>
+                    </div>
+                    <input type="text" placeholder="例如：NextChat 专用 / 办公室电脑" @bind="newKeyName" />
+                </div>
+
+                <div class="form-field">
+                    <div class="form-field-label">
+                        <span>绑定账户</span>
+                        <span class="hint">留空则自动路由活跃账号</span>
+                    </div>
+                    <select @bind="newKeyAccountId">
+                        <option value="">不绑定（号池加权选号）</option>
+                        @foreach (var acc in accounts)
+                        {
+                            <option value="@acc.Id">@(acc.UserName ?? acc.UserId) (@acc.PlanName)</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="form-field">
+                    <div class="form-field-label">
+                        <span>自定义密钥</span>
+                        <span class="hint">可选，留空自动生成 sk-qd-...</span>
+                    </div>
+                    <input type="text" class="mono" placeholder="sk-qd-..." @bind="newCustomKey" />
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="secondary" @onclick="() => isCreateOpen = false">取消</button>
+                <button type="button" class="primary" @onclick="CreateKey">确认创建</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ApiKeyRecord> keys = [];
+    private List<AccountRecord> accounts = [];
+    private string? flashMessage;
+    private bool flashIsError = false;
+
+    private bool isCreateOpen = false;
+    private string newKeyName = "";
+    private string? newKeyAccountId = "";
+    private string newCustomKey = "";
+
+    protected override void OnInitialized()
+    {
+        ReloadData();
+    }
+
+    private void ReloadData()
+    {
+        keys = AuthService.Database.GetAllKeys();
+        accounts = AuthService.Database.GetAllAccounts();
+    }
+
+    private void OpenCreateDialog()
+    {
+        isCreateOpen = true;
+        newKeyName = "";
+        newKeyAccountId = "";
+        newCustomKey = "";
+    }
+
+    private CancellationTokenSource? _toastCts;
+
+    private void ShowToast(string message, bool isError = false, int timeoutMs = 3000)
+    {
+        flashMessage = message;
+        flashIsError = isError;
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(timeoutMs, token);
+                if (!token.IsCancellationRequested)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        flashMessage = null;
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void DismissToast()
+    {
+        _toastCts?.Cancel();
+        flashMessage = null;
+    }
+
+    private void CreateKey()
+    {
+        if (string.IsNullOrWhiteSpace(newKeyName))
+        {
+            newKeyName = "API Key " + DateTime.Now.ToString("MM-dd HH:mm");
+        }
+
+        AuthService.Database.CreateKey(newKeyName, string.IsNullOrWhiteSpace(newKeyAccountId) ? null : newKeyAccountId, newCustomKey);
+        isCreateOpen = false;
+        ShowToast("API Key 已成功创建！");
+        ReloadData();
+    }
+
+    private void ToggleKey(string id)
+    {
+        AuthService.Database.ToggleKeyStatus(id);
+        ShowToast("API Key 状态已切换。");
+        ReloadData();
+    }
+
+    private void DeleteKey(string id)
+    {
+        AuthService.Database.DeleteKey(id);
+        ShowToast("API Key 已被彻底删除并失效。");
+        ReloadData();
+    }
+
+    private async Task CopyKey(string fullKey)
+    {
+        await JS.InvokeVoidAsync("qoderHelper.copyText", fullKey);
+        ShowToast($"API Key ({fullKey[..Math.Min(12, fullKey.Length)]}...) 已成功复制到剪贴板！");
+    }
+
+    public void Dispose()
+    {
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+    }
+}
