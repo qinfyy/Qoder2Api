@@ -1,0 +1,720 @@
+@page "/"
+@using Qoder2Api
+@using Qoder2Api.Components
+@using Qoder2Api.Components.Layout
+@using Qoder2Api.Models
+@using Qoder2Api.Services.Qoder
+@inject QoderAuthService AuthService
+@inject QoderPool Pool
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>账户管理 - Qoder2API 管理</PageTitle>
+
+@if (!string.IsNullOrEmpty(flashMessage))
+{
+    <div class="toast-container">
+        <div class="toast-notice @(flashIsError ? "toast-err" : "toast-ok")" role="alert">
+            <div class="toast-icon">
+                @if (flashIsError)
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" /></svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                }
+            </div>
+            <span class="toast-content">@flashMessage</span>
+            <button type="button" class="toast-close" @onclick="DismissToast" aria-label="关闭">
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+            </button>
+        </div>
+    </div>
+}
+
+<!-- Summary Metrics Cards -->
+<div class="card-grid">
+    <div class="metric-box">
+        <div class="metric-label">号池可用</div>
+        <div class="metric-value">
+            @if (snapshot.Servable)
+            {
+                <span style="color: var(--ok);">@snapshot.Ready / @snapshot.Total</span>
+            }
+            else
+            {
+                <span style="color: var(--warn);">无可用账号</span>
+            }
+        </div>
+        <div class="metric-sub">
+            @if (snapshot.Total == 0)
+            {
+                <span>尚未添加任何账号</span>
+            }
+            else
+            {
+                <span>冷却 @snapshot.Cooling · 熔断 @snapshot.Breaker · 降权 @snapshot.Degraded</span>
+            }
+        </div>
+    </div>
+
+    <div class="metric-box">
+        <div class="metric-label">账户总数</div>
+        <div class="metric-value">@accounts.Count</div>
+        <div class="metric-sub">全部启用账号参与加权选号（非轮询）</div>
+    </div>
+
+    <div class="metric-box">
+        <div class="metric-label">下游调用防护</div>
+        <div class="metric-value">
+            @(AuthService.RequireApiKey ? "已启用 Key 校验" : "公开免密")
+        </div>
+        <div class="metric-sub">可在系统设置或 API Key 页调整</div>
+    </div>
+</div>
+
+<!-- Main Accounts Section -->
+<section class="card">
+    <div class="card-title">
+        <h2>已保存的 Qoder 账户</h2>
+        <div class="row-actions">
+            <button type="button" class="primary" @onclick="OpenAddDialog">
+                + 新增账户
+            </button>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>显示名 / 邮箱</th>
+                    <th>认证方式</th>
+                    <th>套餐 / 额度状态</th>
+                    <th>凭证有效至</th>
+                    <th>池状态</th>
+                    <th>成功率</th>
+                    <th>在途</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (accounts.Count == 0)
+                {
+                    <tr>
+                        <td colspan="9" class="muted" style="text-align: center; padding: 2rem;">
+                            还没有已保存的 Qoder 账户。点击右上角“新增账户”通过 OAuth 或 PAT 连接。
+                        </td>
+                    </tr>
+                }
+                @foreach (var acc in accounts)
+                {
+                    var ps = PoolStatusOf(acc.Id);
+                    <tr>
+                        <td>
+                            <div style="font-weight: 600;">@(string.IsNullOrEmpty(acc.UserName) ? "Qoder 体验用户" : acc.UserName)</div>
+                            <div class="muted" style="font-size: 0.78rem;">@(string.IsNullOrEmpty(acc.UserEmail) ? "—" : acc.UserEmail)</div>
+                        </td>
+                        <td>
+                            <span class="badge" style="background: var(--bg); font-size: 0.72rem;">
+                                @(acc.AuthMethod == "pat" ? "PAT" : "OAuth")
+                            </span>
+                            @if (acc.IsDefault)
+                            {
+                                <div class="muted" style="font-size: 0.68rem; margin-top: 0.15rem;">首选</div>
+                            }
+                        </td>
+                        <td>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <span class="badge" style="font-size: 0.72rem; border-color: var(--accent); color: var(--accent); width: fit-content;">
+                                    @acc.PlanName
+                                </span>
+                                <div style="font-size: 0.75rem;">
+                                    @if (acc.IsQuotaExceeded)
+                                    {
+                                        <span style="color: var(--danger); font-weight: 600;">⚠️ 额度已耗尽</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color: var(--ok);">● 正常 (未超额)</span>
+                                    }
+                                </div>
+                            </div>
+                        </td>
+                        <td style="font-size: 0.8rem; color: var(--muted);">
+                            @(acc.ExpiresAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "长期有效")
+                        </td>
+
+                        <!-- 池状态：就绪 / 冷却 / 熔断 / 降权 / 需重登 / 已停用 -->
+                        <td>
+                            @if (ps is null)
+                            {
+                                <span class="muted" style="font-size: 0.78rem;">—</span>
+                            }
+                            else
+                            {
+                                <span class="badge @PoolBadgeClass(ps.State)" title="@ps.Reason" style="font-size: 0.72rem;">
+                                    @PoolStateLabel(ps)
+                                </span>
+                                @if (ps.RateLimitedModels.Count > 0)
+                                {
+                                    <div class="muted" style="font-size: 0.68rem; margin-top: 0.15rem;"
+                                         title="该账号对这些模型处于模型级限流，切到其他模型不受影响">
+                                        ⛔ @string.Join(", ", ps.RateLimitedModels)
+                                    </div>
+                                }
+                            }
+                        </td>
+
+                        <!-- 近期成功率（EMA 平滑，非终身累计——终身累计只增不减，会让早期出错的号被永久压权） -->
+                        <td class="mono" style="font-size: 0.8rem;">
+                            @if (ps is null || ps.SuccessCount + ps.ErrTotal == 0)
+                            {
+                                <span class="muted">—</span>
+                            }
+                            else
+                            {
+                                <span style="color: @(ps.SuccessRate >= 0.9 ? "var(--ok)" : ps.SuccessRate >= 0.6 ? "var(--warn)" : "var(--danger)");">
+                                    @((ps.SuccessRate * 100).ToString("F0"))%
+                                </span>
+                                <div class="muted" style="font-size: 0.68rem;">
+                                    @ps.SuccessCount / @(ps.SuccessCount + ps.ErrTotal)
+                                </div>
+                            }
+                        </td>
+
+                        <!-- 在途请求数 / 上限 -->
+                        <td class="mono" style="font-size: 0.8rem;">
+                            @if (ps is null)
+                            {
+                                <span class="muted">—</span>
+                            }
+                            else
+                            {
+                                <span>@ps.InFlight@(ps.InFlightLimit > 0 ? $" / {ps.InFlightLimit}" : " / ∞")</span>
+                            }
+                        </td>
+
+                        <td>
+                            @if (acc.Status == "active")
+                            {
+                                @if (acc.IsDefault)
+                                {
+                                    <span class="badge active">● 当前活跃</span>
+                                }
+                                else
+                                {
+                                    <span class="badge active">已启用</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="badge disabled">已停用</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="row-actions">
+                                @if (ps is not null && ps.State != PoolAccountState.Ready)
+                                {
+                                    <button class="secondary" type="button"
+                                            title="清除该账号的全部惩罚状态（冷却/熔断/降权/自动禁用），立刻回到号池"
+                                            @onclick="() => ReviveAccount(acc.Id)">
+                                        解冻
+                                    </button>
+                                }
+                                @if (!acc.IsDefault && acc.Status == "active")
+                                {
+                                    <button class="secondary" type="button" title="首选账号在选号时获得权重加成（所有启用账号都参与选号）" @onclick="() => SetDefaultAccount(acc.Id)">设为首选</button>
+                                }
+                                <button class="secondary" type="button" title="从 Qoder 官方接口查询最新额度与套餐" @onclick="() => RefreshQuota(acc.Id)">
+                                    刷新额度
+                                </button>
+                                <button class="secondary" type="button" @onclick="() => ToggleStatus(acc.Id)">
+                                    @(acc.Status == "active" ? "停用" : "启用")
+                                </button>
+                                <button class="danger" type="button" @onclick="() => DeleteAccount(acc.Id)">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Add Account Wizard Dialog -->
+@if (isAddDialogOpen)
+{
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h2>
+                    <span>⚡</span>
+                    <span>新增 Qoder 账户</span>
+                </h2>
+                <button type="button" class="modal-close-btn" @onclick="CloseAddDialog" aria-label="关闭">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                @if (wizardStep == "select")
+                {
+                    <p class="muted" style="margin: 0 0 0.5rem 0; font-size: 0.88rem;">请选择连接 Qoder 账号的方式：</p>
+                    <div class="stack">
+                        <button type="button" class="btn" style="display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem; text-align: left; height: auto;" @onclick='() => SetWizardStep("oauth")'>
+                            <span style="font-size: 1.5rem; line-height: 1;">🌐</span>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: var(--ink); margin-bottom: 0.2rem;">浏览器一键授权 (OAuth PKCE)</div>
+                                <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">在新标签页中登录 Qoder 确认授权，系统自动接收凭证，安全省心。</div>
+                            </div>
+                        </button>
+
+                        <button type="button" class="btn" style="display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem; text-align: left; height: auto;" @onclick='() => SetWizardStep("pat")'>
+                            <span style="font-size: 1.5rem; line-height: 1;">🔑</span>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: var(--ink); margin-bottom: 0.2rem;">个人访问令牌 (PAT)</div>
+                                <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">填入从 qoder.com/account/integrations 复制的 pt-* 长期令牌。</div>
+                            </div>
+                        </button>
+                    </div>
+                }
+                else if (wizardStep == "oauth")
+                {
+                    <div class="stack">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;" @onclick='() => wizardStep = "select"'>← 返回方式选择</button>
+                            <span class="badge" style="background: var(--bg);">OAuth 设备流</span>
+                        </div>
+
+                        @if (oauthStatus == "idle")
+                        {
+                            <p class="muted" style="font-size: 0.88rem; margin: 0.5rem 0;">
+                                点击下方按钮将生成安全 PKCE 挑战码，并在浏览器中打开 Qoder 官方授权确认页。
+                            </p>
+                            <button type="button" class="primary" style="padding: 0.65rem;" @onclick="StartOAuthAsync">
+                                开始授权并在新窗口打开
+                            </button>
+                        }
+                        else if (oauthStatus == "waiting")
+                        {
+                            <div class="card" style="margin: 0; background: var(--bg); border: 1px dashed var(--line); text-align: center; padding: 1.25rem;">
+                                <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--ink);">
+                                    等待网页端完成授权…
+                                </div>
+                                <div class="mono" style="font-size: 1.25rem; color: var(--accent); margin-bottom: 0.75rem; font-weight: 700;">
+                                    @FormatElapsed(elapsedSeconds)
+                                </div>
+                                <p class="muted" style="font-size: 0.8rem; margin-bottom: 1rem;">
+                                    若浏览器弹窗被拦截，请点击下方链接直接在新标签页中打开：
+                                </p>
+                                <a href="@deviceState?.VerificationUrl" target="_blank" class="btn primary" style="width: 100%;">
+                                    打开 Qoder 授权页 ↗
+                                </a>
+                            </div>
+                            <div style="text-align: center;">
+                                <button type="button" class="btn secondary" style="font-size: 0.8rem;" @onclick="CancelOAuth">取消授权</button>
+                            </div>
+                        }
+                        else if (oauthStatus == "done")
+                        {
+                            <div style="text-align: center; padding: 1.5rem 0;">
+                                <div style="font-size: 2.5rem; color: var(--ok); margin-bottom: 0.5rem;">✔</div>
+                                <div style="font-weight: 700; color: var(--ink); font-size: 1.1rem;">授权成功！</div>
+                                <div class="muted" style="font-size: 0.85rem;">已写入本地 SQLite 数据库，正在刷新...</div>
+                            </div>
+                        }
+                        else if (oauthStatus == "error")
+                        {
+                            <div class="alert-box err">
+                                <span>❌ @oauthError</span>
+                            </div>
+                            <button type="button" class="primary" @onclick="StartOAuthAsync">重试</button>
+                        }
+                    </div>
+                }
+                else if (wizardStep == "pat")
+                {
+                    <div class="stack">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;" @onclick='() => wizardStep = "select"'>← 返回方式选择</button>
+                            <span class="badge" style="background: var(--bg);">PAT 授权</span>
+                        </div>
+
+                        <p class="muted" style="font-size: 0.85rem; margin: 0;">
+                            从您的 Qoder 个人中心获取 Personal Access Token 并粘贴在下方：
+                        </p>
+
+                        <div class="form-field">
+                            <div class="form-field-label">
+                                <span>Personal Access Token</span>
+                                <a href="https://qoder.com/account/integrations" target="_blank" style="font-size: 0.75rem; font-weight: 400;">前往生成 PAT ↗</a>
+                            </div>
+                            <input type="password" class="mono" placeholder="pt-..." @bind="patInput" />
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(patError))
+                        {
+                            <div class="alert-box err">
+                                <span>❌ @patError</span>
+                            </div>
+                        }
+
+                        <button type="button" class="primary" style="padding: 0.6rem;" @onclick="SubmitPatAsync" disabled="@isSubmittingPat">
+                            @(isSubmittingPat ? "正在验证..." : "保存并连接")
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<AccountRecord> accounts = [];
+    private string? flashMessage;
+    private bool flashIsError = false;
+
+    // Wizard
+    private bool isAddDialogOpen = false;
+    private string wizardStep = "select"; // select, oauth, pat
+
+    // OAuth
+    private string oauthStatus = "idle"; // idle, waiting, done, error
+    private string? oauthError;
+    private int elapsedSeconds = 0;
+    private DeviceFlowState? deviceState;
+    private CancellationTokenSource? pollCts;
+    private System.Timers.Timer? elapsedTimer;
+
+    // PAT
+    private string patInput = "";
+    private bool isSubmittingPat = false;
+    private string? patError;
+
+    protected override void OnInitialized()
+    {
+        AuthService.OnAuthStateChanged += HandleAuthChanged;
+        ReloadAccounts();
+    }
+
+    public void Dispose()
+    {
+        AuthService.OnAuthStateChanged -= HandleAuthChanged;
+        CancelOAuth();
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+    }
+
+    private void HandleAuthChanged()
+    {
+        ReloadAccounts();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ReloadAccounts()
+    {
+        accounts = AuthService.Database.GetAllAccounts();
+        // 池状态从内存快照取——不再让 UI 直接查库，避免与池的后台落盘抢 SQLite 写锁。
+        snapshot = Pool.Snapshot();
+        _statusById = snapshot.Accounts.ToDictionary(a => a.AccountId, StringComparer.Ordinal);
+    }
+
+    private PoolSnapshot snapshot = new();
+    private Dictionary<string, PoolAccountStatus> _statusById = new(StringComparer.Ordinal);
+
+    private PoolAccountStatus? PoolStatusOf(string accountId) =>
+        _statusById.TryGetValue(accountId, out var s) ? s : null;
+
+    /// <summary>池状态徽章样式。复用现有 CSS 类，无需新增样式。</summary>
+    private static string PoolBadgeClass(PoolAccountState state) => state switch
+    {
+        PoolAccountState.Ready => "active",
+        PoolAccountState.Disabled => "disabled",
+        _ => "pending", // 冷却/熔断/降权/需重登：都是"暂时或需要处理"的琥珀态
+    };
+
+    private static string PoolStateLabel(PoolAccountStatus ps)
+    {
+        string label = ps.State switch
+        {
+            PoolAccountState.Ready => "就绪",
+            PoolAccountState.Cooling => "冷却中",
+            PoolAccountState.Breaker => "熔断中",
+            PoolAccountState.Degraded => "降权中",
+            PoolAccountState.NeedsRelogin => "需重新登录",
+            PoolAccountState.Disabled => ps.AdminDisabled ? "已停用" : "已禁用",
+            _ => "未知",
+        };
+        if (ps.RemainingSec > 0)
+        {
+            label += " " + FormatRemaining(ps.RemainingSec);
+        }
+        return label;
+    }
+
+    private static string FormatRemaining(long seconds)
+    {
+        if (seconds >= 3600)
+        {
+            return $"{seconds / 3600}h{(seconds % 3600) / 60}m";
+        }
+        if (seconds >= 60)
+        {
+            return $"{seconds / 60}m{seconds % 60}s";
+        }
+        return $"{seconds}s";
+    }
+
+    private void ReviveAccount(string id)
+    {
+        if (Pool.Revive(id))
+        {
+            ShowToast("已解冻：该账号的冷却/熔断/降权状态已清空，立刻回到号池。");
+        }
+        else
+        {
+            ShowToast("解冻失败：账号不在池中。", isError: true);
+        }
+        ReloadAccounts();
+    }
+
+    private CancellationTokenSource? _toastCts;
+
+    private void ShowToast(string message, bool isError = false, int timeoutMs = 3000)
+    {
+        flashMessage = message;
+        flashIsError = isError;
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(timeoutMs, token);
+                if (!token.IsCancellationRequested)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        flashMessage = null;
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void DismissToast()
+    {
+        _toastCts?.Cancel();
+        flashMessage = null;
+    }
+
+    private void SetDefaultAccount(string id)
+    {
+        AuthService.Database.SetDefaultAccount(id);
+        AuthService.NotifyChange();
+        ReloadAccounts();
+        ShowToast("已设为首选账号（所有启用账号仍都参与加权选号，首选只是权重加成）。");
+    }
+
+    private void ToggleStatus(string id)
+    {
+        AuthService.Database.ToggleAccountStatus(id);
+        AuthService.NotifyChange();
+        ReloadAccounts();
+        ShowToast("账户状态已更新。");
+    }
+
+    private void DeleteAccount(string id)
+    {
+        AuthService.Database.DeleteAccount(id);
+        // 一并清掉池状态与指向它的 Key 绑定：
+        // 残留的池状态行会被下次同名 id 复用；悬空的 Key 绑定会让 Keys 页误导用户。
+        AuthService.Database.DeletePoolState(id);
+        AuthService.Database.ClearKeyBindings(id);
+        Pool.SyncAccounts(AuthService.Database.GetAllAccounts());
+        AuthService.NotifyChange();
+        ReloadAccounts();
+        ShowToast("账户已从 SQLite 数据库中删除。");
+    }
+
+    private void OpenAddDialog()
+    {
+        isAddDialogOpen = true;
+        wizardStep = "select";
+        oauthStatus = "idle";
+        patInput = "";
+        patError = null;
+        oauthError = null;
+    }
+
+    private void CloseAddDialog()
+    {
+        CancelOAuth();
+        isAddDialogOpen = false;
+    }
+
+    private void SetWizardStep(string step)
+    {
+        wizardStep = step;
+        oauthStatus = "idle";
+        patInput = "";
+        patError = null;
+        oauthError = null;
+    }
+
+    private async Task StartOAuthAsync()
+    {
+        oauthStatus = "waiting";
+        oauthError = null;
+        elapsedSeconds = 0;
+
+        try
+        {
+            deviceState = AuthService.InitiateDeviceFlow();
+
+            // Open in new tab
+            await JS.InvokeVoidAsync("qoderHelper.openInNewTab", deviceState.VerificationUrl);
+
+            // Timer
+            elapsedTimer?.Dispose();
+            elapsedTimer = new System.Timers.Timer(1000);
+            elapsedTimer.Elapsed += (s, e) =>
+            {
+                elapsedSeconds++;
+                InvokeAsync(StateHasChanged);
+            };
+            elapsedTimer.Start();
+
+            // Poll
+            pollCts?.Cancel();
+            pollCts = new CancellationTokenSource();
+            _ = PollLoopAsync(deviceState, pollCts.Token);
+        }
+        catch (Exception ex)
+        {
+            oauthStatus = "error";
+            oauthError = ex.Message;
+        }
+    }
+
+    private async Task PollLoopAsync(DeviceFlowState state, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(1800, ct);
+
+            try
+            {
+                bool success = await AuthService.PollDeviceFlowAsync(state, ct);
+                if (success)
+                {
+                    elapsedTimer?.Stop();
+                    oauthStatus = "done";
+                    await InvokeAsync(StateHasChanged);
+
+                    await Task.Delay(1200, ct);
+                    await InvokeAsync(() =>
+                    {
+                        CloseAddDialog();
+                        flashMessage = "Qoder OAuth 账号已连接并存入 SQLite 数据库！";
+                        flashIsError = false;
+                        ReloadAccounts();
+                        StateHasChanged();
+                    });
+                    break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                elapsedTimer?.Stop();
+                oauthStatus = "error";
+                oauthError = ex.Message;
+                await InvokeAsync(StateHasChanged);
+                break;
+            }
+
+            if (elapsedSeconds > 300)
+            {
+                elapsedTimer?.Stop();
+                oauthStatus = "error";
+                oauthError = "授权已超时（5 分钟），请重试。";
+                await InvokeAsync(StateHasChanged);
+                break;
+            }
+        }
+    }
+
+    private void CancelOAuth()
+    {
+        elapsedTimer?.Stop();
+        elapsedTimer?.Dispose();
+        elapsedTimer = null;
+
+        pollCts?.Cancel();
+        pollCts?.Dispose();
+        pollCts = null;
+
+        oauthStatus = "idle";
+    }
+
+    private async Task SubmitPatAsync()
+    {
+        string pat = patInput.Trim();
+        if (string.IsNullOrWhiteSpace(pat))
+        {
+            patError = "请输入有效的 Personal Access Token (以 pt- 开头)";
+            return;
+        }
+
+        isSubmittingPat = true;
+        patError = null;
+
+        try
+        {
+            await AuthService.ConnectPatAsync(pat);
+            isSubmittingPat = false;
+            CloseAddDialog();
+            ShowToast("PAT 验证通过并已存入 SQLite 数据库！");
+            ReloadAccounts();
+        }
+        catch (Exception ex)
+        {
+            isSubmittingPat = false;
+            patError = ex.Message;
+        }
+    }
+
+    private string FormatElapsed(int seconds)
+    {
+        int m = seconds / 60;
+        int s = seconds % 60;
+        return $"{m:D2}:{s:D2}";
+    }
+
+    private async Task RefreshQuota(string accountId)
+    {
+        try
+        {
+            var res = await AuthService.RefreshAccountStatusAsync(accountId);
+            ReloadAccounts();
+            string statusStr = res.IsQuotaExceeded ? "⚠️ 额度已超额" : "● 额度正常 (可用)";
+            ShowToast($"账户状态与额度已刷新：{res.UserTag ?? res.Plan} · {statusStr}");
+        }
+        catch (Exception ex)
+        {
+            ShowToast($"刷新额度失败: {ex.Message}", isError: true);
+        }
+    }
+}

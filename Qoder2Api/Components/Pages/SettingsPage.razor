@@ -1,0 +1,386 @@
+@page "/settings"
+@using Qoder2Api
+@using Qoder2Api.Components
+@using Qoder2Api.Components.Layout
+@using Qoder2Api.Services.Qoder
+@inject QoderAuthService AuthService
+@inject ModelCatalogRefresher CatalogRefresher
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>系统设置 - Qoder2API 管理</PageTitle>
+
+@if (!string.IsNullOrEmpty(flashMessage))
+{
+    <div class="toast-container">
+        <div class="toast-notice @(flashIsError ? "toast-err" : "toast-ok")" role="alert">
+            <div class="toast-icon">
+                @if (flashIsError)
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" /></svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                }
+            </div>
+            <span class="toast-content">@flashMessage</span>
+            <button type="button" class="toast-close" @onclick="DismissToast" aria-label="关闭">
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+            </button>
+        </div>
+    </div>
+}
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+    <!-- Column 1: Gateway & Protection -->
+    <div class="stack">
+        <!-- API Endpoints Card -->
+        <section class="card" style="margin: 0;">
+            <div class="card-title">
+                <h2>API 接口端点</h2>
+            </div>
+
+            <div class="stack">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                        <span style="font-size: 0.82rem; font-weight: 600;">API Base URL (大部分客户端填此项)</span>
+                        <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.15rem 0.45rem;" @onclick='() => CopyText(GetBaseUrl())'>复制</button>
+                    </div>
+                    <div class="urlbox mono">@GetBaseUrl()</div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                        <span style="font-size: 0.82rem; font-weight: 600;">Chat Completions 完整路径</span>
+                        <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.15rem 0.45rem;" @onclick='() => CopyText(GetBaseUrl() + "/chat/completions")'>复制</button>
+                    </div>
+                    <div class="urlbox mono">@(GetBaseUrl() + "/chat/completions")</div>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                        <span style="font-size: 0.82rem; font-weight: 600;">Models 模型发现路径</span>
+                        <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.15rem 0.45rem;" @onclick='() => CopyText(GetBaseUrl() + "/models")'>复制</button>
+                    </div>
+                    <div class="urlbox mono">@(GetBaseUrl() + "/models")</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Access Protection Card -->
+        <section class="card" style="margin: 0;">
+            <div class="card-title">
+                <h2>下游调用鉴权保护</h2>
+                @* 开关与标题同排右侧：它是一个状态，不是需要单独占一行再配保存按钮的操作 *@
+                <label class="switch" title="@(requireApiKey ? "点击关闭保护" : "点击开启保护")">
+                    <input type="checkbox" @bind="requireApiKey" @bind:event="oninput" />
+                    <span class="switch-track"></span>
+                    <span class="switch-label">@(requireApiKey ? "已启用" : "已关闭")</span>
+                </label>
+            </div>
+
+            <p class="muted" style="font-size: 0.85rem; margin-top: 0;">
+                控制是否强制要求下游客户端在请求头提供有效的 API Key（在 “API Key” 页面维护）。改动立即生效，无需保存。
+            </p>
+
+            <div class="muted" style="font-size: 0.78rem;">
+                @if (requireApiKey)
+                {
+                    <span style="color: var(--ok);">● 已启用保护：下游客户端必须在请求头中携带有效的 Bearer Key，未授权将被拒绝。</span>
+                }
+                else
+                {
+                    <span>○ 未启用保护：本机及局域网客户端可免密直接调用（可任意填写 sk-xxx）。</span>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(flashMessage))
+            {
+                <div style="font-size: 0.75rem; color: @(flashIsError ? "var(--danger)" : "var(--ok)");">
+                    @flashMessage
+                </div>
+            }
+        </section>
+    </div>
+
+    <!-- Column 2: Storage Engine & Client Guides -->
+    <div class="stack">
+        <!-- Storage Engine Info -->
+        <section class="card" style="margin: 0;">
+            <div class="card-title">
+                <h2>系统概览</h2>
+            </div>
+
+            <dl class="dl">
+                <dt>已登记账户数</dt>
+                <dd>@AuthService.Accounts.Count 个</dd>
+
+                <dt>已发放 Key 数</dt>
+                <dd>@AuthService.Database.GetAllKeys().Count 个</dd>
+            </dl>
+        </section>
+
+        <!-- Quick Curl Test -->
+        <section class="card" style="margin: 0;">
+            <div class="card-title">
+                <h2>Curl 命令行测试示例</h2>
+                <button type="button" class="btn secondary" style="font-size: 0.75rem;" @onclick="() => CopyText(GetCurlCommand())">复制完整命令</button>
+            </div>
+
+            <pre class="urlbox mono" style="margin: 0; font-size: 0.75rem; line-height: 1.5;">@GetCurlCommand()</pre>
+        </section>
+
+        <!-- Client Setup Guide -->
+        <section class="card" style="margin: 0;">
+            <div class="card-title">
+                <h2>主流客户端配置提示</h2>
+            </div>
+
+            <div style="font-size: 0.85rem; line-height: 1.6;" class="muted">
+                <p style="margin-bottom: 0.5rem;"><strong style="color: var(--ink);">NextChat / Cherry Studio / Cursor：</strong></p>
+                <ul style="padding-left: 1.25rem; margin: 0;">
+                    <li><strong>接口地址 (Base URL)</strong>: <code class="mono">@GetBaseUrl()</code></li>
+                    <li><strong>API Key</strong>: 填写任意已启用的 Key（免密模式下填任意字符串如 <code>sk-123</code>）</li>
+                    <li><strong>推荐模型</strong>: <code class="mono">auto</code>（自动综合模式）或 <code class="mono">dmodel</code>（DeepSeek 深度思考推理）</li>
+                </ul>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- Official Supported Models Table -->
+<section class="card" style="margin-top: 1.25rem;">
+    <div class="card-title">
+        <div>
+            <h2>官方模型映射配置 (@QoderConstants.OfficialModels.Count 款模型已加载)</h2>
+            <div class="muted" style="font-size: 0.8rem; margin-top: 0.25rem;">
+                映射配置文件：<code class="mono" style="font-size: 0.78rem; background: var(--bg-hover); padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border-color);">@QoderConstants.ModelConfigPath</code> · 无论填写官方显示名、内部 Key 还是常用别名，均可精准映射识别
+            </div>
+        </div>
+        <div class="row-actions">
+            <button type="button" class="secondary" style="font-size: 0.8rem;" @onclick="ReloadModelConfig">
+                🔄 重新加载 models.xml
+            </button>
+            @* 倍率与错峰折扣是上游实时下发的，不在 models.xml 里维护，需要单独拉取 *@
+            <button type="button" class="primary" style="font-size: 0.8rem;" @onclick="SyncFromUpstream" disabled="@isSyncing">
+                @(isSyncing ? "同步中…" : "⬇ 同步上游倍率/折扣")
+            </button>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>模型名称 (DisplayName)</th>
+                    <th>内部 Key</th>
+                    <th>倍率</th>
+                    <th>特性</th>
+                    <th>官方定位与描述</th>
+                    <th>常用别名</th>
+                    <th style="text-align: right;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var m in QoderConstants.OfficialModels)
+                {
+                    <tr>
+                        <td>
+                            <strong style="color: var(--ink); font-size: 0.9rem;">@m.DisplayName</strong>
+                        </td>
+                        <td>
+                            <code class="mono" style="font-size: 0.82rem;">@m.Key</code>
+                        </td>
+                        @* 倍率来自上游 /api/v2/model/list（price_factor），1 = 标准，越小越便宜 *@
+                        <td class="mono" style="white-space: nowrap;">
+                            @if (m.PriceFactor is { } pf)
+                            {
+                                <span style="color: @(pf < 1 ? "var(--ok)" : pf > 1 ? "var(--warn)" : "var(--muted)"); font-weight: 600;">
+                                    ×@pf.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                            @if (m.IsFree == true)
+                            {
+                                <span class="badge" style="background: #dcfce7; color: #15803d; font-size: 0.68rem;">免费</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(m.PromotionLabel))
+                            {
+                                <div style="font-size: 0.7rem; color: var(--warn); font-weight: 600; margin-top: 0.15rem;">
+                                    @m.PromotionLabel
+                                    @if (!string.IsNullOrWhiteSpace(m.PromotionWindow))
+                                    {
+                                        <span class="muted" style="font-weight: 400;"> @m.PromotionWindow</span>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                                @if (m.IsReasoning)
+                                {
+                                    <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.72rem;">深度思考/推理</span>
+                                }
+                                @if (m.IsVl)
+                                {
+                                    <span class="badge" style="background: #fef3c7; color: #b45309; font-size: 0.72rem;">多模态/视觉</span>
+                                }
+                                <span class="badge" style="background: #f1f5f9; color: #475569; font-size: 0.72rem;">@(m.MaxInputTokens / 1000)k 上下文</span>
+                            </div>
+                        </td>
+                        <td style="font-size: 0.82rem; max-width: 320px; line-height: 1.45; color: var(--ink-secondary);">
+                            @m.Description
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap; max-width: 220px;">
+                                @foreach (var a in m.Aliases.Take(3))
+                                {
+                                    <code class="mono" style="font-size: 0.75rem; background: var(--bg-hover); padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border-color);">@a</code>
+                                }
+                            </div>
+                        </td>
+                        <td style="text-align: right;">
+                            <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" @onclick='() => CopyText(m.DisplayName)'>复制名称</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private string? flashMessage;
+    private bool flashIsError = false;
+    private bool _requireApiKey;
+
+    private bool requireApiKey
+    {
+        get => _requireApiKey;
+        set
+        {
+            if (_requireApiKey == value)
+            {
+                return;
+            }
+            _requireApiKey = value;
+            try
+            {
+                AuthService.RequireApiKey = value;
+                ShowToast(value ? "已启用鉴权保护：下游请求需携带有效 API Key。" : "已关闭鉴权保护：下游请求将免密放行。");
+            }
+            catch (Exception ex)
+            {
+                _requireApiKey = !value; // 回滚 UI
+                ShowToast($"保存失败：{ex.Message}", isError: true);
+            }
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        requireApiKey = AuthService.RequireApiKey;
+    }
+
+    private string GetBaseUrl()
+    {
+        var uri = new Uri(Nav.BaseUri);
+        return $"{uri.Scheme}://{uri.Authority}/v1";
+    }
+
+    private CancellationTokenSource? _toastCts;
+
+    private void ShowToast(string message, bool isError = false, int timeoutMs = 3000)
+    {
+        flashMessage = message;
+        flashIsError = isError;
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(timeoutMs, token);
+                if (!token.IsCancellationRequested)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        flashMessage = null;
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void DismissToast()
+    {
+        _toastCts?.Cancel();
+        flashMessage = null;
+    }
+
+    private async Task CopyText(string text)
+    {
+        await JS.InvokeVoidAsync("qoderHelper.copyText", text);
+        ShowToast("已复制到剪贴板！");
+    }
+
+    private void ReloadModelConfig()
+    {
+        QoderConstants.ReloadModels();
+        ShowToast($"已重新加载 models.xml！当前生效模型共 {QoderConstants.OfficialModels.Count} 款。");
+    }
+
+    private bool isSyncing = false;
+
+    /// <summary>
+    /// 从上游拉取倍率与错峰折扣，写回 models.xml。
+    /// 直接调服务实例而非发 HTTP 请求——同进程内调用，省去一次自身往返。
+    /// </summary>
+    private async Task SyncFromUpstream()
+    {
+        isSyncing = true;
+        try
+        {
+            bool ok = await CatalogRefresher.TryRefreshAsync();
+            var snap = CatalogRefresher.Catalog.Last;
+            ShowToast(ok
+                ? $"已同步上游模型信息：{snap.Models.Count} 个模型的倍率与折扣已写入 models.xml。"
+                : $"同步失败：{snap.Error ?? "未知原因"}", isError: !ok);
+            StateHasChanged();
+        }
+        finally
+        {
+            isSyncing = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+    }
+
+    private string GetCurlCommand()
+    {
+        return $"curl {GetBaseUrl()}/chat/completions \\\n" +
+               $"  -H \"Content-Type: application/json\" \\\n" +
+               $"  -H \"Authorization: Bearer sk-any-key\" \\\n" +
+               $"  -d '{{\n" +
+               $"    \"model\": \"auto\",\n" +
+               $"    \"stream\": true,\n" +
+               $"    \"messages\": [\n" +
+               $"      {{\"role\": \"user\", \"content\": \"你好，请用一句话介绍你自己\"}}\n" +
+               $"    ]\n" +
+               $"  }}'";
+    }
+}

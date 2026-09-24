@@ -1,0 +1,97 @@
+@inherits LayoutComponentBase
+@using Qoder2Api
+@using Qoder2Api.Components
+@using Qoder2Api.Components.Layout
+@using Qoder2Api.Services.Qoder
+@inject QoderAuthService AuthService
+@inject QoderPool Pool
+@inject NavigationManager Nav
+@implements IDisposable
+
+<header class="top">
+    <div class="top-inner">
+        <h1>
+            <span style="color: var(--accent);">⚡</span>
+            <span>Qoder2API 管理</span>
+        </h1>
+        <nav class="main-tabs" aria-label="管理导航">
+            <NavLink class="main-tab" href="" Match="NavLinkMatch.All">账户管理</NavLink>
+            <NavLink class="main-tab" href="keys">API Key</NavLink>
+            <NavLink class="main-tab" href="usage">用量记录</NavLink>
+            <NavLink class="main-tab" href="settings">系统设置</NavLink>
+        </nav>
+        <div class="top-right">
+            @* 号池健康总览。旧版显示的是"首选账号名"，但号池模式下所有启用账号都参与
+               加权选号，单个账号名已不能代表服务可用性。 *@
+            @if (snapshot.Total == 0)
+            {
+                <span class="badge pending" title="尚未添加任何 Qoder 账户">
+                    ○ 未连接账户
+                </span>
+            }
+            else if (snapshot.Servable)
+            {
+                <span class="badge active" title="号池可用 @snapshot.Ready / @snapshot.Total">
+                    ● 号池就绪 (@snapshot.Ready/@snapshot.Total)
+                </span>
+            }
+            else
+            {
+                <span class="badge pending" title="冷却 @snapshot.Cooling · 熔断 @snapshot.Breaker · 降权 @snapshot.Degraded · 停用 @snapshot.Disabled">
+                    ○ 池内无可用账号
+                </span>
+            }
+        </div>
+    </div>
+</header>
+
+<div class="wrap">
+    @Body
+
+</div>
+
+<div id="blazor-error-ui" data-nosnippet style="display: none;">
+    发生未处理的错误。
+    <a href="." class="reload">重新加载</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private Qoder2Api.Models.PoolSnapshot snapshot = new();
+    private System.Timers.Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        AuthService.OnAuthStateChanged += HandleAuthChanged;
+        RefreshSnapshot();
+
+        // 池状态是内存态，变化不会触发 OnAuthStateChanged（那是账号增删才发的）。
+        // 用低频轮询刷新徽章即可——Snapshot() 只做一次锁内浅拷贝，代价可忽略。
+        _refreshTimer = new System.Timers.Timer(3000);
+        _refreshTimer.Elapsed += (_, _) => InvokeAsync(() =>
+        {
+            RefreshSnapshot();
+            StateHasChanged();
+        });
+        _refreshTimer.AutoReset = true;
+        _refreshTimer.Start();
+    }
+
+    public void Dispose()
+    {
+        AuthService.OnAuthStateChanged -= HandleAuthChanged;
+        _refreshTimer?.Stop();
+        _refreshTimer?.Dispose();
+    }
+
+    private void HandleAuthChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshSnapshot();
+            StateHasChanged();
+        });
+    }
+
+    private void RefreshSnapshot() => snapshot = Pool.Snapshot();
+}
