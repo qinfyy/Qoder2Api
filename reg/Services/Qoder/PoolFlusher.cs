@@ -1,30 +1,24 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 
 namespace reg.Services.Qoder;
 
 /// <summary>
-/// 号池状态的后台落盘器 + 账号列表对齐器。
-///
-/// **为什么必须有它**：号池的请求路径只改内存，不碰数据库。原因是
-/// Microsoft.Data.Sqlite **没有真正的异步 I/O**（其 async 方法内部就是同步执行的），
-/// 在请求路径上写库会直接阻塞 Kestrel 的线程；而 SQLite 的默认 busy 行为是
-/// **阻塞等待**（默认 30 秒）而非快速失败，并发写会把线程池吃干，
-/// 连带拖垮 Blazor Server 的渲染调度（表现为整个管理页"点不动"）。
-///
-/// 把落盘收敛到这一个后台循环里，阻塞就只发生在这一条线程上。
-///
-/// 同时它也负责周期性地把数据库里的账号列表同步进池——这样用户在管理页新增/
-/// 删除/停用账号后，池能在一个周期内感知到，而不需要每条写路径都去通知池。
+/// 号池状态后台落盘 + 账号列表对齐。
+/// 请求路径只改内存不碰库：Microsoft.Data.Sqlite 没有真正的异步 I/O，
+/// 且默认是阻塞等待（30s）而非快速失败，放请求路径上会把线程池吃干。
 /// </summary>
 public sealed class PoolFlusher : BackgroundService
 {
     private readonly QoderPool _pool;
     private readonly QoderAuthService _auth;
+    private readonly ILogger<PoolFlusher> _log;
 
-    public PoolFlusher(QoderPool pool, QoderAuthService auth)
+    public PoolFlusher(QoderPool pool, QoderAuthService auth, ILogger<PoolFlusher> log)
     {
         _pool = pool;
         _auth = auth;
+        _log = log;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -62,7 +56,7 @@ public sealed class PoolFlusher : BackgroundService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[PoolFlusher] 账号列表同步失败（下轮重试）: {ex.Message}");
+            _log.LogWarning(ex, "账号列表同步失败，下轮重试");
         }
     }
 }

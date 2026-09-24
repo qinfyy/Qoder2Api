@@ -1,9 +1,9 @@
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace reg.Services.Qoder;
 
-/// <summary>单个 (账号, 模型) 的模型级冷却持久化记录。</summary>
 public sealed class ModelCooldownRecord
 {
     [JsonPropertyName("until_ms")]
@@ -16,10 +16,6 @@ public sealed class ModelCooldownRecord
     public string Reason { get; set; } = "";
 }
 
-/// <summary>
-/// 账号池状态的持久化记录（与 account_pool_states 表一一对应）。
-/// 时间一律用 Unix 毫秒整数——避开 DateTimeOffset 在 SQLite 上的映射坑。
-/// </summary>
 public sealed class PoolStateRecord
 {
     public string AccountId { get; set; } = "";
@@ -54,17 +50,6 @@ public sealed class PoolStateRecord
     public long UpdatedAtMs { get; set; }
 }
 
-/// <summary>
-/// 池状态的内存 ↔ 持久化双向映射。
-///
-/// **持久化什么、不持久化什么**：
-///   - 持久化：退避累积（BreakerRetryCount/SoftStreak）、冷却与熔断截止、模型级冷却、
-///     连败计数、成功率 EMA。这些是"学到的知识"，重启丢失会导致重新踩坑
-///     （例如软限流仍在退避中，重启后却从基数重新开始，或反复熔断只从最小退避起步）。
-///   - 不持久化：InFlight / UsedSeq / LastUsedAt（纯运行态，重启后无意义）。
-///
-/// 落盘与恢复都做**惰性过滤**：已过期的截止时间不写、也不恢复（陈旧状态不复活）。
-/// </summary>
 public static class PoolStateStore
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -121,7 +106,7 @@ public static class PoolStateStore
         };
     }
 
-    public static void ApplyToEntry(PoolEntry e, PoolStateRecord s)
+    public static void ApplyToEntry(PoolEntry e, PoolStateRecord s, ILogger? log = null)
     {
         var now = DateTimeOffset.UtcNow;
         e.Disabled = s.Disabled;
@@ -175,16 +160,14 @@ public static class PoolStateStore
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PoolStateStore] 模型级冷却反序列化失败（忽略）: {ex.Message}");
+                log?.LogWarning(ex, "模型级冷却反序列化失败，该账号的模型冷却将被忽略");
             }
         }
     }
 
-    /// <summary>仅返回仍有效的截止时刻（已过期的返回 null，即"不持久化"）。</summary>
     private static long? Live(DateTimeOffset? v, DateTimeOffset now) =>
         v is { } x && x > now ? x.ToUnixTimeMilliseconds() : null;
 
-    /// <summary>恢复：已过期的时间点返回 null（等价于"该惩罚已结束"）。</summary>
     private static DateTimeOffset? Revive(long? ms, DateTimeOffset now)
     {
         if (ms is not { } v)

@@ -19,7 +19,7 @@ public static class CosySigner
     static CosySigner()
     {
         Rsa = RSA.Create();
-        Rsa.ImportFromPem(QoderConstants.RSAPublicKeyPEM);
+        Rsa.FromXmlString(QoderConstants.RSAPublicKeyXml);
     }
 
     public static Dictionary<string, string> BuildCosyHeaders(byte[] body, string requestUrl, CosyCreds creds)
@@ -32,7 +32,7 @@ public static class CosySigner
         string aesKey = Guid.NewGuid().ToString("N")[..16];
         byte[] aesKeyBytes = Encoding.UTF8.GetBytes(aesKey);
 
-        // Encrypt UserInfo payload
+        // 加密 UserInfo
         var userInfoObj = new
         {
             uid = creds.UserID,
@@ -43,7 +43,6 @@ public static class CosySigner
         };
         byte[] userInfoJsonBytes = JsonSerializer.SerializeToUtf8Bytes(userInfoObj);
 
-        // AES-128-CBC encryption (key and IV are both aesKeyBytes)
         byte[] encryptedUserInfo;
         using (var aes = Aes.Create())
         {
@@ -56,7 +55,7 @@ public static class CosySigner
         }
         string infoB64 = Convert.ToBase64String(encryptedUserInfo);
 
-        // RSA encrypt AES key
+        // 使用 RSA 加密 AES 密钥
         byte[] encryptedAesKey = Rsa.Encrypt(aesKeyBytes, RSAEncryptionPadding.Pkcs1);
         string cosyKey = Convert.ToBase64String(encryptedAesKey);
 
@@ -73,7 +72,6 @@ public static class CosySigner
         };
         string payloadB64 = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(payloadObj));
 
-        // Compute sigPath
         Uri uri = new(requestUrl);
         string sigPath = uri.AbsolutePath;
         if (sigPath.StartsWith("/algo"))
@@ -81,7 +79,6 @@ public static class CosySigner
             sigPath = sigPath[5..];
         }
 
-        // Compute MD5 signature
         string bodyLatin1 = Encoding.Latin1.GetString(body);
         string sigInput = $"{payloadB64}\n{cosyKey}\n{timestamp}\n{bodyLatin1}\n{sigPath}";
         string sig = Convert.ToHexStringLower(MD5.HashData(Encoding.Latin1.GetBytes(sigInput)));

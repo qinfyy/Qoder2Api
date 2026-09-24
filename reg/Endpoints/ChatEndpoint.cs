@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Options;
+using reg.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -7,16 +10,20 @@ using reg.Services.Usage;
 
 namespace reg.Endpoints;
 
-/// <summary>
-/// <c>/v1/chat/completions</c>：OpenAI 兼容的对话端点。
-///
-/// **核心约束**：流式响应一旦写出字节就无法再换号——客户端会收到两段拼接的内容，
-/// 而且无法察觉。所以轮换必须发生在**写出任何响应字节之前**：
-/// 先选号 → 发起上游连接 → 探测首包 → 确认首包不是错误 → 才提交给客户端。
-/// 这一步把绝大多数账号级故障（401/403/429/模型无权限，都发生在首包）变成了可安全重试的。
-/// </summary>
 public static class ChatEndpoint
 {
+    private enum AttemptOutcome
+    {
+        /// <summary>已拿到可转发的内容，提交给客户端。</summary>
+        Committed,
+
+        /// <summary>本账号不可用，换一个号试试。</summary>
+        Rotate,
+
+        /// <summary>请求级错误或队列耗尽——换号也没用，直接把错误透传给下游。</summary>
+        GiveUp,
+    }
+
     public static void MapChatEndpoint(this IEndpointRouteBuilder app)
     {
         app.MapPost("/v1/chat/completions", HandleAsync);
@@ -27,13 +34,16 @@ public static class ChatEndpoint
         QoderProxyService proxy,
         QoderAuthService auth,
         QoderPool pool,
+        QoderQueueClient queue,
+        IOptions<QueueOptions> queueOptions,
         HttpContext context,
+        ILoggerFactory logFactory,
         CancellationToken ct)
     {
+        var log = logFactory.CreateLogger("reg.Endpoints.ChatEndpoint");
         var sw = Stopwatch.StartNew();
         var db = auth.Database;
 
-        // ---- 1. 鉴权。需要拿到 Key 记录本身，才能实现「API Key 粘性绑定账号」。 ----
         var (keyOk, key) = ResolveKey(auth, context);
         if (!keyOk)
         {
@@ -48,9 +58,6 @@ public static class ChatEndpoint
             return OpenAiErrors.Unauthorized("API Key 无效或缺失。");
         }
 
-        // ---- 2. 池准入闸门。 ----
-        // 不能用 auth.IsAuthenticated：它背后是「首选账号是否 active」，
-        // 首选账号被停用时，即使池里还有 5 个健康账号也会被拦掉。
         if (!pool.HasUsableAccount())
         {
             db.LogUsage(new UsageRecord
@@ -68,140 +75,216 @@ public static class ChatEndpoint
         bool isStream = request.Stream == true;
         var tried = new HashSet<string>(StringComparer.Ordinal);
 
-        // ---- 3. 轮换循环：选号 → 连上游 → 探测首包 ----
         AccountLease? lease = null;
         QoderStreamSession? session = null;
         QoderUpstreamException? lastError = null;
 
-        for (int attempt = 0; attempt < pool.Options.MaxRotate; attempt++)
+        for (int rotate = 0; rotate < pool.Options.MaxRotate; rotate++)
         {
             lease = pool.TryAcquire(request.Model, boundAccountId, tried);
             if (lease is null)
             {
                 break; // 没有更多可选账号
             }
-            // 用非空局部量贯穿本轮尝试，避免在 catch 里反复判空（编译器也据此消除可空警告）。
             var held = lease;
             tried.Add(held.AccountId);
 
             var account = db.GetAccountById(held.AccountId);
             if (account is null)
             {
-                // 账号在选中后被删除：释放并继续。
+                held.Dispose();
+                lease = null;
+                continue; // 选中后被删除
+            }
+
+            CosyCreds creds;
+            try
+            {
+                creds = await auth.GetCredsForAccountAsync(account, ct);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "取账号凭证失败 account={Account}", Short(held.AccountId));
+                lastError = new QoderUpstreamException(QoderErrorKind.SessionDead, null, ex.Message, ex.Message);
+                pool.ApplyError(held.AccountId, QoderErrorKind.SessionDead, ex.Message, request.Model);
                 held.Dispose();
                 lease = null;
                 continue;
             }
 
-            try
+            var outcome = await ServeOnAccountAsync(
+                request, proxy, queue, queueOptions.Value, pool, held.AccountId, creds, log, ct,
+                s => session = s,
+                e => lastError = e);
+
+            if (outcome == AttemptOutcome.Committed)
             {
-                var creds = await auth.GetCredsForAccountAsync(account, ct);
-                session = await proxy.OpenAsync(request, creds, held.AccountId, ct);
-
-                var prime = await session.PrimeAsync(ct);
-                if (prime == PrimeResult.Committed)
-                {
-                    break; // ★ 提交点：从这里开始绑定这个账号，不再换号
-                }
-
-                // 首包就是错误：分类 → 惩罚 → 换号（此时**尚未写出任何响应字节**）
-                lastError = session.Error;
-                if (lastError is not null)
-                {
-                    pool.ApplyError(held.AccountId, lastError.Kind, lastError.RawBody, request.Model);
-                }
-                await session.DisposeAsync();
-                session = null;
-                held.Dispose();
-                lease = null;
-
-                if (prime == PrimeResult.FatalError)
-                {
-                    break; // 请求级错误（内容拦截/上下文超长）：换号也没用，直接返回原文
-                }
-                if (!await RotateBackoffAsync(attempt, ct))
-                {
-                    break; // 客户端断连
-                }
+                break; // session 已就位，去转发
             }
-            catch (QoderUpstreamException ex)
-            {
-                lastError = ex;
-                pool.ApplyError(held.AccountId, ex.Kind, ex.RawBody, request.Model);
-                if (session is not null)
-                {
-                    await session.DisposeAsync();
-                    session = null;
-                }
-                held.Dispose();
-                lease = null;
 
-                if (!ex.Kind.IsRetryable())
-                {
-                    break;
-                }
-                if (!await RotateBackoffAsync(attempt, ct))
-                {
-                    break;
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            session = null;
+            held.Dispose();
+            lease = null;
+
+            if (outcome == AttemptOutcome.GiveUp)
             {
-                // 客户端断连：不是账号的错，不记 NoteError、不惩罚账号。
-                held.Dispose();
-                lease = null;
-                if (session is not null)
-                {
-                    await session.DisposeAsync();
-                    session = null;
-                }
-                sw.Stop();
-                db.LogUsage(new UsageRecord
-                {
-                    Model = request.Model,
-                    LatencyMs = sw.ElapsedMilliseconds,
-                    HttpStatus = 499,
-                    Status = "cancelled",
-                    ErrorMessage = "客户端断开连接",
-                });
-                return Results.Empty;
+                break; // 请求级错误：换号也没用，直接把上游原文透传给下游
+            }
+
+            if (!await RotateBackoffAsync(rotate, ct))
+            {
+                break; // 客户端断连
             }
         }
 
-        // ---- 4. 全部尝试失败 ----
         if (session is null || lease is null)
         {
             sw.Stop();
-            if (lastError is not null)
-            {
-                db.LogUsage(new UsageRecord
-                {
-                    Model = request.Model,
-                    LatencyMs = sw.ElapsedMilliseconds,
-                    HttpStatus = 502,
-                    Status = "error",
-                    ErrorMessage = lastError.Message,
-                });
-                return OpenAiErrors.FromUpstream(lastError);
-            }
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
                 LatencyMs = sw.ElapsedMilliseconds,
-                HttpStatus = StatusCodes.Status503ServiceUnavailable,
+                HttpStatus = lastError is null ? StatusCodes.Status503ServiceUnavailable : 502,
                 Status = "error",
-                ErrorMessage = "重试后仍无可用账号",
+                ErrorMessage = lastError?.Message ?? "重试后仍无可用账号",
             });
-            return OpenAiErrors.NoAccount("重试后仍无可用账号，请稍后再试。");
+            return lastError is not null ? OpenAiErrors.FromUpstream(lastError) : OpenAiErrors.NoAccount("重试后仍无可用账号，请稍后再试。");
         }
 
-        // ---- 5. 已提交：流式或非流式 ----
-        return isStream
-            ? await StreamCommittedAsync(context, session, lease, request, pool, db, sw, ct)
-            : await NonStreamCommittedAsync(session, lease, request, pool, db, sw, ct);
+        return isStream ? await StreamCommittedAsync(context, session, lease, request, pool, db, sw, ct) : await NonStreamCommittedAsync(session, lease, request, pool, db, sw, ct);
     }
 
-    /// <summary>已提交后的流式转发。</summary>
+    private static async Task<AttemptOutcome> ServeOnAccountAsync(
+        ChatCompletionRequest request,
+        QoderProxyService proxy,
+        QoderQueueClient queue,
+        QueueOptions queueOptions,
+        QoderPool pool,
+        string accountId,
+        CosyCreds creds,
+        ILogger log,
+        CancellationToken ct,
+        Action<QoderStreamSession> onCommitted,
+        Action<QoderUpstreamException> onError)
+    {
+        QoderRequestIds? ids = null;
+        int queueRecoveries = 0;
+        var queuedSoFar = TimeSpan.Zero;   // 累计排队时长，MaxWait 是跨轮次的总预算
+
+        while (true)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                return AttemptOutcome.GiveUp;
+            }
+
+            QoderStreamSession? session = null;
+            try
+            {
+                session = await proxy.OpenAsync(request, creds, accountId, ids, ct);
+                var prime = await session.PrimeAsync(ct);
+
+                if (prime == PrimeResult.Committed)
+                {
+                    onCommitted(session);
+                    return AttemptOutcome.Committed;
+                }
+
+                var error = session.Error
+                            ?? new QoderUpstreamException(QoderErrorKind.Server, null, "", "上游无响应");
+                onError(error);
+
+                if (error.Kind == QoderErrorKind.ModelQueued)
+                {
+                    if (!queueOptions.Enabled)
+                    {
+                        log.LogWarning("收到排队响应但排队已禁用，改为换号");
+                    }
+                    else if (queueRecoveries >= queueOptions.MaxRecoveries)
+                    {
+                        log.LogWarning("排队恢复次数已达上限 {Max}，放弃 account={Account}",
+                            queueOptions.MaxRecoveries, Short(accountId));
+                    }
+                    else
+                    {
+                        var queueCtx = QoderQueueParser.Parse(error.RawBody);
+                        var modelKey = session.ModelKey;
+                        var requestSetId = session.Ids.RequestSetId;
+                        ids = session.Ids; // 复用同一组 ID —— 排队记录按 RequestSetId 关联
+
+                        await session.DisposeAsync();
+                        session = null;
+
+                        log.LogInformation(
+                            "模型排队，等待中 account={Account} requestSetId={RequestSetId} 队列类型={QueueType} 队列长度={QueueCount} 建议间隔={RetryAfter}s 第 {Attempt} 次",
+                            Short(accountId), Short(requestSetId), queueCtx?.QueueType ?? "-",
+                            queueCtx?.QueueCount?.ToString() ?? "-", queueCtx?.RetryAfterSeconds?.ToString() ?? "-",
+                            queueRecoveries + 1);
+
+                        var wait = await queue.WaitUntilReadyAsync(
+                            requestSetId, modelKey, queueCtx?.QueueType, queueCtx, creds, queuedSoFar, ct);
+                        queuedSoFar += TimeSpan.FromMilliseconds(wait.WaitedMs);
+
+                        switch (wait.Outcome)
+                        {
+                            case QueueWaitOutcome.Ready:
+                                queueRecoveries++;
+                                log.LogInformation("排队结束，在原账号重试 account={Account} 等待 {WaitedMs}ms 轮询 {PollCount} 次",
+                                    Short(accountId), wait.WaitedMs, wait.PollCount);
+                                continue; // 同一账号重试，不换号
+
+                            case QueueWaitOutcome.Cancelled:
+                                return AttemptOutcome.GiveUp;
+
+                            default:
+                                log.LogWarning("排队未成功（{Outcome}）: {Detail} —— 改为换号",
+                                    wait.Outcome, wait.Detail ?? "-");
+                                break;
+                        }
+                    }
+                }
+
+                // 其他错误：按策略惩罚账号 ----
+                pool.ApplyError(accountId, error.Kind, error.RawBody, request.Model);
+                if (session is not null)
+                {
+                    await session.DisposeAsync();
+                }
+
+                // 请求级错误（内容拦截/上下文超长）换号也没用，直接把上游原文透传给下游。
+                return prime == PrimeResult.FatalError ? AttemptOutcome.GiveUp : AttemptOutcome.Rotate;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                if (session is not null)
+                {
+                    await session.DisposeAsync();
+                }
+                return AttemptOutcome.GiveUp; // 客户端断连，不惩罚账号
+            }
+            catch (QoderUpstreamException ex)
+            {
+                onError(ex);
+                if (session is not null)
+                {
+                    await session.DisposeAsync();
+                }
+                pool.ApplyError(accountId, ex.Kind, ex.RawBody, request.Model);
+                return ex.Kind.IsRetryable() ? AttemptOutcome.Rotate : AttemptOutcome.GiveUp;
+            }
+            catch (Exception ex)
+            {
+                onError(new QoderUpstreamException(QoderErrorKind.Transport, null, "", ex.Message));
+                if (session is not null)
+                {
+                    await session.DisposeAsync();
+                }
+                pool.ApplyError(accountId, QoderErrorKind.Transport, null, request.Model);
+                return AttemptOutcome.Rotate;
+            }
+        }
+    }
+
     private static async Task<IResult> StreamCommittedAsync(
         HttpContext context,
         QoderStreamSession session,
@@ -218,7 +301,6 @@ public static class ChatEndpoint
 
         try
         {
-            // 此刻才设置 SSE 响应头并开始写——之前任何一步失败都还没污染响应。
             context.Response.Headers.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-cache";
             context.Response.Headers.Append("X-Accel-Buffering", "no");
@@ -236,8 +318,6 @@ public static class ChatEndpoint
                         break;
 
                     case StreamEventKind.Usage when ev.Json is not null:
-                        // OpenAI 契约：只有客户端显式请求了 include_usage 才发这个 chunk。
-                        // 但**无论发不发，usage 都已经被 session 采集**——统计不依赖转发。
                         if (includeUsage)
                         {
                             await WriteSseAsync(context, ev.Json, ct);
@@ -245,17 +325,13 @@ public static class ChatEndpoint
                         break;
 
                     case StreamEventKind.Finish:
-                        // 上游私有事件，不透传（OpenAI 客户端不认）。
-                        break;
+                        break; // 上游私有事件，不透传
 
                     case StreamEventKind.Done:
-                        // include_usage 为真但上游没给 usage chunk 时，不发伪造的 0——
-                        // 客户端对缺失 usage 是容忍的，伪造反而会让下游统计出错。
                         await WriteRawAsync(context, "data: [DONE]\n\n", ct);
                         goto done;
                 }
             }
-            // 上游没发 [DONE] 就断了：补一个，否则客户端会一直转圈等它。
             if (!ct.IsCancellationRequested)
             {
                 await WriteRawAsync(context, "data: [DONE]\n\n", ct);
@@ -265,15 +341,12 @@ public static class ChatEndpoint
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // 客户端断连：不惩罚账号、不写错误（响应已断，写也没人收）。
             streamError = "客户端断开连接";
         }
         catch (Exception ex)
         {
             streamError = ex.Message;
             pool.ApplyError(lease.AccountId, ClassifyException(ex), ExtractBody(ex), request.Model);
-            // 已提交 → 只能把错误塞进 SSE 流里降级，**绝不能换号重试**
-            // （客户端会收到两段拼接的内容且无法察觉）。
             await TryWriteStreamErrorAsync(context, ex, ct);
         }
         finally
@@ -287,7 +360,6 @@ public static class ChatEndpoint
         return Results.Empty;
     }
 
-    /// <summary>已提交后的非流式聚合。</summary>
     private static async Task<IResult> NonStreamCommittedAsync(
         QoderStreamSession session,
         AccountLease lease,
@@ -347,7 +419,6 @@ public static class ChatEndpoint
         }
     }
 
-    /// <summary>把流式 chunk 聚合成一个完整的 chat.completion 响应体。</summary>
     private static async Task<string> AggregateAsync(QoderStreamSession session, ChatCompletionRequest request, CancellationToken ct)
     {
         string id = "chatcmpl-" + Guid.NewGuid().ToString("N");
@@ -435,14 +506,7 @@ public static class ChatEndpoint
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    // ---------------------------------------------------------------------
-    // 辅助
-    // ---------------------------------------------------------------------
 
-    /// <summary>
-    /// 校验 API Key。返回 (是否放行, Key 记录)。
-    /// 不启用校验时放行且无绑定；启用时 Key 记录用于取 AccountId 做粘性绑定。
-    /// </summary>
     private static (bool Ok, ApiKeyRecord? Key) ResolveKey(QoderAuthService auth, HttpContext context)
     {
         if (!auth.RequireApiKey)
@@ -470,7 +534,6 @@ public static class ChatEndpoint
         return (key is not null, key);
     }
 
-    /// <summary>轮换退避：500ms·2^i，封顶 8s，±25% 抖动。返回 false 表示客户端已断连。</summary>
     private static async Task<bool> RotateBackoffAsync(int attempt, CancellationToken ct)
     {
         double baseMs = 500 * Math.Pow(2, attempt);
@@ -478,7 +541,7 @@ public static class ChatEndpoint
         {
             baseMs = 8000;
         }
-        double jitter = 1.0 + (Random.Shared.NextDouble() - 0.5) * 0.5; // ±25%
+        double jitter = 1.0 + (Random.Shared.NextDouble() - 0.5) * 0.5;
         int delayMs = (int)(baseMs * jitter);
         try
         {
@@ -502,18 +565,9 @@ public static class ChatEndpoint
         await context.Response.Body.FlushAsync(ct);
     }
 
-    /// <summary>
-    /// 已提交后的错误降级：写一条 OpenAI 风格的 error 对象 + [DONE]。
-    ///
-    /// 三点讲究：
-    ///   1. 绝不换号重试（客户端会收到两段拼接内容）；
-    ///   2. 必须补 [DONE]，否则 NextChat/Cherry Studio 会一直转圈；
-    ///   3. 写之前判 ct——客户端已断连时再写会抛异常，把原始错误吞掉，
-    ///      日志里就只剩"断连"、看不到真实原因了。
-    /// </summary>
     private static async Task TryWriteStreamErrorAsync(HttpContext context, Exception ex, CancellationToken ct)
     {
-        if (ct.IsCancellationRequested || context.Response.HasStarted == false)
+        if (ct.IsCancellationRequested || !context.Response.HasStarted)
         {
             return;
         }
@@ -572,4 +626,6 @@ public static class ChatEndpoint
 
     private static string? ExtractBody(Exception ex) =>
         ex is QoderUpstreamException qe ? qe.RawBody : null;
+
+    private static string Short(string s) => s.Length > 8 ? s[..8] : s;
 }

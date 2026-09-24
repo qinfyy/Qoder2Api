@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <Logging>
+    <LogLevel>
+      <Default>Information</Default>
+      <Microsoft.AspNetCore>Information</Microsoft.AspNetCore>
+      <Microsoft.EntityFrameworkCore>Information</Microsoft.EntityFrameworkCore>
+      <System.Net.Http.HttpClient>Information</System.Net.Http.HttpClient>
+    </LogLevel>
+  </Logging>
+
+  <AllowedHosts>*</AllowedHosts>
+
+  <Pool>
+    <!-- 单请求最多换几个账号。 -->
+    <MaxRotate>3</MaxRotate>
+
+    <!-- 单账号在途请求上限，0 = 不限。 -->
+    <MaxInFlightPerAccount>3</MaxInFlightPerAccount>
+
+    <!-- 连续多少次 5xx 触发熔断。 -->
+    <BreakerThreshold>3</BreakerThreshold>
+    <BreakerCooldown>00:30:00</BreakerCooldown>
+    <BreakerCooldownMax>06:00:00</BreakerCooldownMax>
+
+    <!-- 软冷却指数退避的封顶。-->
+    <SoftRateMax>02:00:00</SoftRateMax>
+
+    <!-- 未知错误连败多少次临时出池。 -->
+    <DegradeThreshold>5</DegradeThreshold>
+    <DegradeCooldown>00:10:00</DegradeCooldown>
+
+    <!-- 连续会话失效多少次判定账号死亡（需重新登录）。-->
+    <SessionDeadThreshold>3</SessionDeadThreshold>
+
+    <!-- 每小时恢复的选号权重，避免热点集中在少数账号。 -->
+    <IdleWeightPerHour>0.5</IdleWeightPerHour>
+    <IdleWeightMax>5.0</IdleWeightMax>
+
+    <!-- 加权抽签的短名单大小，用于打散热点。 -->
+    <ShortlistSize>5</ShortlistSize>
+
+    <!-- 在途租约的兜底回收时长，防漏释放导致计数泄漏。 -->
+    <LeaseTtl>00:10:00</LeaseTtl>
+
+    <!-- 池状态后台落盘周期。请求路径只改内存，落盘收敛到这一个后台循环。 -->
+    <FlushInterval>00:00:05</FlushInterval>
+  </Pool>
+
+  <Queue>
+    <!-- true = 优先排队等待；false = 退回"直接换号"。 -->
+    <Enabled>true</Enabled>
+
+    <!-- 单个请求最长排队等待。官方客户端默认 1 小时。 -->
+    <MaxWait>01:00:00</MaxWait>
+
+    <MaxRecoveries>10</MaxRecoveries>
+
+    <!-- 无 retryAfterSeconds 时的轮询间隔。官方客户端 30s。 -->
+    <DefaultPollInterval>00:00:30</DefaultPollInterval>
+
+    <!-- 轮询间隔的钳制区间。 -->
+    <MinPollInterval>00:00:00.500</MinPollInterval>
+    <MaxPollInterval>00:00:30</MaxPollInterval>
+
+    <!-- 连续轮询失败上限，超过则放弃排队改换号。 -->
+    <MaxConsecutivePollFailures>3</MaxConsecutivePollFailures>
+
+    <!-- 单次排队状态查询的超时。 -->
+    <PollRequestTimeout>00:00:30</PollRequestTimeout>
+  </Queue>
+
+</configuration>

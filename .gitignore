@@ -361,3 +361,15 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Custom
+/save
+# --- 凭据与运行时数据（绝不入库）---
+# 含真实 JobToken/DeviceToken，是旧版遗留的迁移源文件
+reg/qoder_auth_config.json
+**/qoder_auth_config.json
+# SQLite 运行时数据（账户凭据、API Key、用量记录都在里面）
+reg/save/
+save/
+# HTTP 抓包（含真实设备令牌/邮箱，逆向素材仅留本地）
+*.har

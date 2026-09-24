@@ -160,11 +160,8 @@ public enum UsageSource
 }
 
 /// <summary>
-/// OpenAI 规范的 usage 对象。
-///
-/// **哨兵原则**：观测缺失时字段为 null 而不是 0。0 表示"确实测得 0 个 token"，
-/// null 表示"没观测到"——把两者混同会伪造数据，让用量统计看起来有值其实是假的。
-/// 序列化时 null 字段被省略（OpenAI 客户端对缺失字段是容忍的）。
+/// OpenAI 规范的 usage。哨兵原则：观测缺失留 null 而非 0——
+/// "测得 0" 与 "没观测到" 混同会伪造统计。序列化时 null 字段省略。
 /// </summary>
 public sealed class UsageInfo
 {

@@ -1,21 +1,9 @@
 namespace reg.Services.Usage;
 
 /// <summary>
-/// 本地 token 估算器——**只作兜底**。
-///
-/// 优先级永远是「上游实测 &gt; 本地估算」（见 <see cref="UsageCollector"/>）。抓包证实
-/// Qoder 的 SSE 会给出真实的 <c>usage</c>，所以本估算器只在极少数情况生效
-/// （上游未返回 usage chunk，例如流被中断）。
-///
-/// 为什么不用真正的分词器：Qoder 承载的都是国产模型（Qwen / Kimi / GLM / DeepSeek /
-/// MiniMax），cl100k 这类 GPT 词表本来就不匹配，引入 1.7MB 的词表数据换来的精度提升
-/// 有限；而真正准确的值上游已经直接给了。
-///
-/// 估算口径（业界常用的粗略近似，误差约 ±15%）：
-///   - CJK 字符：约 1 token / 字
-///   - 其余字符：约 4 字符 / token
-///   - 每条消息额外 +3（角色与分隔符开销），整体再 +3（回复引导开销）
-/// —— 消息开销部分取自 OpenAI 官方 cookbook 的计数示例。
+/// 本地 token 估算器，仅作兜底（上游实测优先，见 <see cref="UsageCollector"/>）。
+/// 口径：CJK 约 1 token/字，其余约 4 字符/token，每条消息 +3，整体再 +3。
+/// 不用真分词器是因为 Qoder 全是国产模型，cl100k 词表本就不匹配。
 /// </summary>
 public static class TokenEstimator
 {

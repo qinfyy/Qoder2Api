@@ -3,15 +3,10 @@ using reg.Services.Qoder;
 
 namespace reg.Endpoints;
 
-/// <summary>
-/// OpenAI 兼容的只读端点（模型列表、状态）。
-/// 对话端点在 <see cref="ChatEndpoint"/>（轮换逻辑较重，单独成文件）。
-/// </summary>
 public static class ApiRoutes
 {
     public static void MapQoderApiRoutes(this IEndpointRouteBuilder app)
     {
-        // 1. 模型列表
         app.MapGet("/v1/models", (QoderAuthService auth, HttpContext context) =>
         {
             if (!ValidateApiKey(auth, context))
@@ -26,7 +21,6 @@ public static class ApiRoutes
             return Results.Ok(resp);
         });
 
-        // 2. 状态（给 UI 与运维用；同时透出号池概览）
         app.MapGet("/api/status", (QoderAuthService auth, QoderPool pool) =>
         {
             var active = auth.ActiveAccount;
@@ -62,7 +56,6 @@ public static class ApiRoutes
         });
     }
 
-    /// <summary>校验 API Key（仅布尔语义；需要 Key 记录本身时用 ChatEndpoint 里的实现）。</summary>
     private static bool ValidateApiKey(QoderAuthService auth, HttpContext context)
     {
         if (!auth.RequireApiKey)

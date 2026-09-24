@@ -1,22 +1,15 @@
+using System.Text.Json.Serialization;
+using System.Xml.Linq;
+
 namespace reg.Services.Qoder;
 
-/// <summary>出站 HTTP 客户端的共享约定。</summary>
 public static class QoderHttp
 {
-    /// <summary>
-    /// 具名 HttpClient 的名称（Program.cs 注册、各服务 CreateClient 时引用）。
-    /// 该客户端的 Timeout 是 <see cref="Timeout.InfiniteTimeSpan"/>，超时一律由
-    /// QoderStreamSession 的首字节/读空闲超时管理——SSE 流不能被总时长限制。
-    /// </summary>
+
     public const string ClientName = "qoder";
 
-    /// <summary>首字节超时：连首个事件都拿不到就换号（账号级故障多在首包暴露）。</summary>
     public static readonly TimeSpan PrimeTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>
-    /// 读空闲超时：连续这么久没有任何数据即放弃。防上游静默挂死——客户端断连后
-    /// 若上游既不发数据也不断开，仅靠 ct 取消不保证读操作立刻返回。
-    /// </summary>
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(120);
 }
 
@@ -32,8 +25,9 @@ public static class QoderConstants
     public const string UserInfoURL = "https://openapi.qoder.sh/api/v1/userinfo";
     public const string DeviceLoginURL = "https://qoder.com/device/selectAccounts";
     public const string DeviceTokenPollURL = "https://openapi.qoder.sh/api/v1/deviceToken/poll";
+    // 模型排队状态查询
+    public const string QueueStatusURL = "https://api3.qoder.sh/algo/api/v2/service/ask/queue/status";
 
-    // COSY header fingerprint constants
     public const string IDEVersion = "1.0.0";
     public const string ClientType = "5";
     public const string DataPolicy = "disagree";
@@ -41,14 +35,11 @@ public static class QoderConstants
     public const string MachineOS = "x86_64_windows";
     public const string MachineType = "5";
 
-    // RSA Public Key for COSY encryption (Extracted from official client)
-    public const string RSAPublicKeyPEM = """
-    -----BEGIN PUBLIC KEY-----
-    MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDA8iMH5c02LilrsERw9t6Pv5Nc
-    4k6Pz1EaDicBMpdpxKduSZu5OANqUq8er4GM95omAGIOPOh+Nx0spthYA2BqGz+l
-    6HRkPJ7S236FZz73In/KVuLnwI8JJ2CbuJap8kvheCCZpmAWpb/cPx/3Vr/J6I17
-    XcW+ML9FoCI6AOvOzwIDAQAB
-    -----END PUBLIC KEY-----
+    public const string RSAPublicKeyXml = """
+    <RSAKeyValue>
+        <Modulus>wPIjB+XNNi4pa7BEcPbej7+TXOJOj89RGg4nATKXacSnbkmbuTgDalKvHq+BjPeaJgBiDjzofjcdLKbYWANgahs/peh0ZDye0tt+hWc+9yJ/ylbi58CPCSdgm7iWqfJL4XggmaZgFqW/3D8f91a/yeiNe13FvjC/RaAiOgDrzs8=</Modulus>
+        <Exponent>AQAB</Exponent>
+    </RSAKeyValue>
     """;
 
     // WAF Bypass Alphabets
@@ -60,25 +51,25 @@ public static class QoderConstants
 
     public class QoderModelDefinition
     {
-        [System.Text.Json.Serialization.JsonPropertyName("key")]
+        [JsonPropertyName("key")]
         public string Key { get; set; } = "auto";
 
-        [System.Text.Json.Serialization.JsonPropertyName("display_name")]
+        [JsonPropertyName("display_name")]
         public string DisplayName { get; set; } = "Auto";
 
-        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        [JsonPropertyName("description")]
         public string Description { get; set; } = "";
 
-        [System.Text.Json.Serialization.JsonPropertyName("is_reasoning")]
+        [JsonPropertyName("is_reasoning")]
         public bool IsReasoning { get; set; } = false;
 
-        [System.Text.Json.Serialization.JsonPropertyName("is_vl")]
+        [JsonPropertyName("is_vl")]
         public bool IsVl { get; set; } = false;
 
-        [System.Text.Json.Serialization.JsonPropertyName("max_input_tokens")]
+        [JsonPropertyName("max_input_tokens")]
         public int MaxInputTokens { get; set; } = 128000;
 
-        [System.Text.Json.Serialization.JsonPropertyName("aliases")]
+        [JsonPropertyName("aliases")]
         public List<string> Aliases { get; set; } = [];
 
         public QoderModelDefinition() { }
@@ -110,24 +101,29 @@ public static class QoderConstants
         }
     }
 
+    private const string ModelConfigFileName = "models.xml";
+
     public static string ModelConfigPath
     {
         get
         {
-            string cwdJson = Path.Combine(Directory.GetCurrentDirectory(), "models.json");
-            if (File.Exists(cwdJson)) return cwdJson;
+            string cwd = Path.Combine(Directory.GetCurrentDirectory(), ModelConfigFileName);
+            if (File.Exists(cwd))
+                return cwd;
 
-            string saveJson = Path.Combine(Directory.GetCurrentDirectory(), "save", "models.json");
-            if (File.Exists(saveJson)) return saveJson;
+            string save = Path.Combine(Directory.GetCurrentDirectory(), "save", ModelConfigFileName);
+            if (File.Exists(save))
+                return save;
 
-            string baseJson = Path.Combine(AppContext.BaseDirectory, "models.json");
-            if (File.Exists(baseJson)) return baseJson;
+            string baseDir = Path.Combine(AppContext.BaseDirectory, ModelConfigFileName);
+            if (File.Exists(baseDir))
+                return baseDir;
 
-            return cwdJson;
+            return cwd;
         }
     }
 
-    public static void ReloadModels()
+    public static void ReloadModels(ILogger? logger = null)
     {
         lock (ModelLock)
         {
@@ -136,25 +132,26 @@ public static class QoderConstants
             {
                 try
                 {
-                    string json = File.ReadAllText(path, System.Text.Encoding.UTF8);
-                    var list = System.Text.Json.JsonSerializer.Deserialize<List<QoderModelDefinition>>(json, new System.Text.Json.JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-                    if (list != null && list.Count > 0)
+                    var list = LoadFromXml(path);
+                    if (list is { Count: > 0 })
                     {
                         _officialModels = list;
-                        Console.WriteLine($"[QoderConstants] Loaded {_officialModels.Count} models from {path}");
+                        logger?.LogInformation("已从 {Path} 加载 {Count} 个模型", path, list.Count);
                         return;
                     }
+                    logger?.LogWarning("{Path} 中没有解析出任何模型，将使用内置默认值", path);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[QoderConstants] Error loading models from {path}: {ex.Message}");
+                    logger?.LogError(ex, "解析 {Path} 失败，将使用内置默认值", path);
                 }
             }
+            else
+            {
+                logger?.LogInformation("{Path} 不存在，写入内置默认模型表供编辑", path);
+            }
 
-            // Fallback to builtin defaults and write out to path
+            // 回落到内置默认值，并写出一份模板。
             _officialModels = GetBuiltinDefaults();
             try
             {
@@ -163,16 +160,72 @@ public static class QoderConstants
                 {
                     Directory.CreateDirectory(dir);
                 }
-                string formatted = System.Text.Json.JsonSerializer.Serialize(_officialModels, new System.Text.Json.JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                });
-                File.WriteAllText(path, formatted, System.Text.Encoding.UTF8);
+                SaveToXml(path, _officialModels);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "写入 {Path} 失败（不影响运行，仅无法生成模板）", path);
+            }
         }
     }
+
+    private static List<QoderModelDefinition> LoadFromXml(string path)
+    {
+        var doc = System.Xml.Linq.XDocument.Load(path);
+        var root = doc.Root;
+        if (root is null)
+        {
+            return [];
+        }
+
+        var list = new List<QoderModelDefinition>();
+        foreach (var el in root.Elements("model"))
+        {
+            string key = (string?)el.Attribute("key") ?? "";
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            list.Add(new QoderModelDefinition
+            {
+                Key = key.Trim(),
+                DisplayName = ((string?)el.Element("displayName"))?.Trim() ?? key,
+                Description = ((string?)el.Element("description"))?.Trim() ?? "",
+                IsReasoning = ParseBool((string?)el.Element("isReasoning")),
+                IsVl = ParseBool((string?)el.Element("isVl")),
+                MaxInputTokens = ParseInt((string?)el.Element("maxInputTokens"), 128000),
+                Aliases = el.Element("aliases")?.Elements("alias")
+                    .Select(a => a.Value.Trim())
+                    .Where(a => a.Length > 0)
+                    .ToList() ?? [],
+            });
+        }
+        return list;
+    }
+
+    private static void SaveToXml(string path, List<QoderModelDefinition> models)
+    {
+        var doc = new XDocument(
+            new XDeclaration("1.0", "utf-8", null),
+            new XElement("models",
+                models.Select(m => new XElement("model",
+                    new XAttribute("key", m.Key),
+                    new XElement("displayName", m.DisplayName),
+                    new XElement("description", m.Description),
+                    new XElement("isReasoning", m.IsReasoning ? "true" : "false"),
+                    new XElement("isVl", m.IsVl ? "true" : "false"),
+                    new XElement("maxInputTokens", m.MaxInputTokens),
+                    new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a)))))));
+
+        doc.Save(path);
+    }
+
+    private static bool ParseBool(string? s) =>
+        bool.TryParse(s, out var v) && v;
+
+    private static int ParseInt(string? s, int fallback) =>
+        int.TryParse(s, out var v) && v > 0 ? v : fallback;
 
     public static List<QoderModelDefinition> GetBuiltinDefaults() =>
     [
@@ -210,11 +263,12 @@ public static class QoderConstants
             }
         }
 
-        // 1. Official Display Names
-        foreach (var m in OfficialModels) Add(m.DisplayName);
-        // 2. Official Keys
-        foreach (var m in OfficialModels) Add(m.Key);
-        // 3. Lowercase aliases
+        foreach (var m in OfficialModels)
+            Add(m.DisplayName);
+
+        foreach (var m in OfficialModels)
+            Add(m.Key);
+
         foreach (var m in OfficialModels)
         {
             foreach (var alias in m.Aliases) Add(alias);
@@ -236,29 +290,31 @@ public static class QoderConstants
             raw = raw[6..].Trim();
         }
 
-        // 1. Direct match with Key or DisplayName
         var match = OfficialModels.FirstOrDefault(m =>
             m.Key.Equals(raw, StringComparison.OrdinalIgnoreCase) ||
             m.DisplayName.Equals(raw, StringComparison.OrdinalIgnoreCase)
         );
-        if (match != null) return match;
 
-        // 2. Direct match with Aliases
+        if (match != null)
+            return match;
+
         match = OfficialModels.FirstOrDefault(m =>
             m.Aliases.Any(a => a.Equals(raw, StringComparison.OrdinalIgnoreCase))
         );
-        if (match != null) return match;
 
-        // 3. Normalized alphanumeric match (ignore '-', '_', '.', space)
+        if (match != null)
+            return match;
+
         string norm = NormalizeIdentifier(raw);
         match = OfficialModels.FirstOrDefault(m =>
             NormalizeIdentifier(m.Key) == norm ||
             NormalizeIdentifier(m.DisplayName) == norm ||
             m.Aliases.Any(a => NormalizeIdentifier(a) == norm)
         );
-        if (match != null) return match;
 
-        // 4. Prefix & heuristic mapping
+        if (match != null)
+            return match;
+
         string lower = raw.ToLowerInvariant();
         if (lower.Contains("3.8-max") || lower.Contains("38max") || lower.Contains("3.8_max"))
             return OfficialModels.First(m => m.Key == "qmodel_38max");

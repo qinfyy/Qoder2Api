@@ -12,4 +12,14 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
+  <!--
+    配置文件用 XML（见 Program.cs 的说明）。Web SDK 默认只把 appsettings*.json
+    复制到输出目录，XML 需要显式声明，否则 dotnet run 时读不到。
+  -->
+  <ItemGroup>
+    <Content Include="appsettings.xml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="appsettings.*.xml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="models.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -3,7 +3,7 @@ $json = @'
   "model": "auto",
   "stream": false,
   "messages": [
-    { "role": "user", "content": "Hello, respond with: OK_QODER_PROXY_ACTIVE" }
+    { "role": "user", "content": "Hi" }
   ]
 }
 '@

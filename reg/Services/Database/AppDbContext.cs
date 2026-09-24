@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using reg.Models;
@@ -68,7 +69,7 @@ public class AppDbContext : DbContext
         });
     }
 
-    public static void InitializeDatabase(AppDbContext db)
+    public static void InitializeDatabase(AppDbContext db, ILogger? log = null)
     {
         string saveDir = Path.Combine(Directory.GetCurrentDirectory(), "save");
         if (!Directory.Exists(saveDir))
@@ -80,7 +81,7 @@ public class AppDbContext : DbContext
 
         // 幂等 schema 补丁（WAL / 池状态表 / usage 新列）。
         // 必须在任何 EF 查询之前——EnsureCreated 对已存在的库不建新表也不加列。
-        SchemaPatches.Apply(db);
+        SchemaPatches.Apply(db, log);
 
         // Migrate existing qoder_auth_config.json if accounts is empty
         if (!db.Accounts.Any())
@@ -150,7 +151,7 @@ public class AppDbContext : DbContext
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AppDbContext] Initial migration warning: {ex.Message}");
+                    log?.LogWarning(ex, "迁移遗留 qoder_auth_config.json 时出错，已跳过");
                 }
             }
         }

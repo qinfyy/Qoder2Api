@@ -1,35 +1,18 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 
 namespace reg.Services.Database;
 
-/// <summary>
-/// 启动期的幂等 schema 补丁。
-///
-/// 为什么必须手写而不用 EF：<c>EnsureCreated()</c> 在数据库已存在时**什么都不做**
-/// （它只看库文件在不在，不比对表结构），所以新增表/新增列对老库完全无效。而引入
-/// EF Migrations 又要处理「已有 EnsureCreated 库没有 __EFMigrationsHistory」的
-/// baseline 问题，成本远高于收益。
-///
-/// 纪律：本文件是**唯一**的 schema 变更入口。所有语句必须幂等（CREATE TABLE
-/// IF NOT EXISTS / 先查 PRAGMA 再加列），可以安全地在每次启动时重复执行。
-/// 调用点在 <see cref="AppDbContext.InitializeDatabase"/>，且必须在任何 EF 查询之前。
-/// </summary>
 public static class SchemaPatches
 {
-    public static void Apply(AppDbContext db)
+    public static void Apply(AppDbContext db, ILogger? log = null)
     {
-        ApplyPragmas(db);
+        ApplyPragmas(db, log);
         CreatePoolStateTable(db);
         AddUsageColumns(db);
     }
 
-    /// <summary>
-    /// WAL 模式：读不阻塞写、写不阻塞读。号池的后台落盘与 UI 的用量查询会并发访问，
-    /// 默认的 rollback journal 下两者严格互斥，UI 轮询会卡住池的 flush。
-    /// journal_mode 是**库文件级持久属性**，设一次永久生效；重复执行无害。
-    /// synchronous=NORMAL 是 WAL 下的官方推荐档位（兼顾安全与吞吐）。
-    /// </summary>
-    private static void ApplyPragmas(AppDbContext db)
+    private static void ApplyPragmas(AppDbContext db, ILogger? log)
     {
         try
         {
@@ -39,19 +22,10 @@ public static class SchemaPatches
         catch (Exception ex)
         {
             // 不阻断启动：极端情况下（如只读介质）退化为默认模式仍可运行。
-            Console.WriteLine($"[SchemaPatches] PRAGMA 设置失败（将使用默认 journal 模式）: {ex.Message}");
+            log?.LogWarning(ex, "PRAGMA 设置失败，将使用默认 journal 模式");
         }
     }
 
-    /// <summary>
-    /// 账号池状态表。**刻意不进 EF 模型**：
-    ///   - 高频小表，绕过 EF 变更跟踪更省；
-    ///   - 只有一处 DDL，不存在「EF 生成的列类型」与「手写 DDL」两套表示漂移的风险；
-    ///   - 时间一律存 Unix 毫秒整数，避开 DateTimeOffset 在 SQLite 上的映射坑。
-    ///
-    /// 与 accounts.Status 的分工：Status 是**管理员**手动启停；本表的 disabled 是
-    /// **池自动**禁用（连续会话失效）。两者都为真才影响可选性，语义不重叠。
-    /// </summary>
     private static void CreatePoolStateTable(AppDbContext db)
     {
         db.Database.ExecuteSqlRaw("""
@@ -82,11 +56,6 @@ public static class SchemaPatches
             """);
     }
 
-    /// <summary>
-    /// usage_records 的新列。SQLite **不支持** <c>ALTER TABLE ... ADD COLUMN IF NOT
-    /// EXISTS</c>，只能先 PRAGMA table_info 查一遍再决定加不加。
-    /// 默认值用常量（SQLite 的 ADD COLUMN 不接受非常量默认值）。
-    /// </summary>
     private static void AddUsageColumns(AppDbContext db)
     {
         var existing = ReadColumnNames(db, "usage_records");

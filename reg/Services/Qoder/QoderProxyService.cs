@@ -8,46 +8,36 @@ using reg.Services.Usage;
 
 namespace reg.Services.Qoder;
 
-/// <summary>流事件的种类。</summary>
 public enum StreamEventKind
 {
-    /// <summary>常规内容 chunk（已改写 model 字段，可直接转发）。</summary>
     Chunk,
-
-    /// <summary>纯用量 chunk（<c>choices:[]</c> + <c>usage</c>）。是否转发给客户端由 include_usage 决定。</summary>
     Usage,
-
-    /// <summary>上游的 [DONE]。</summary>
     Done,
-
-    /// <summary>上游的 event:finish（含 firstTokenDuration，用于记 TTFT）。</summary>
     Finish,
 }
 
-/// <summary>一个流事件。</summary>
 public readonly record struct StreamEvent(StreamEventKind Kind, string? Json = null, long FirstTokenMs = 0);
 
-/// <summary>探测首个事件的结果。</summary>
+public sealed record QoderRequestIds(string RequestId, string RequestSetId, string ChatRecordId, string SessionId)
+{
+    public static QoderRequestIds New()
+    {
+        string recordId = Guid.NewGuid().ToString("N")[..16];
+        return new QoderRequestIds(
+            RequestId: Guid.NewGuid().ToString(),
+            RequestSetId: recordId,
+            ChatRecordId: recordId,
+            SessionId: Guid.NewGuid().ToString("N")[..16]);
+    }
+}
+
 public enum PrimeResult
 {
-    /// <summary>拿到有效业务内容，可以提交给客户端了。</summary>
     Committed,
-
-    /// <summary>首包就是可重试的错误（换号可能成功）。</summary>
     RetryableError,
-
-    /// <summary>首包是请求级错误（换号也没用，应直接把原文返回给客户端）。</summary>
     FatalError,
 }
 
-/// <summary>
-/// 一次上游 SSE 会话。持有 HTTP 连接，负责把上游的「信封 + 内层 JSON」解包成
-/// <see cref="StreamEvent"/>，并顺带采集用量。
-///
-/// **生命周期**：必须在 finally 里 Dispose。Dispose 会中止底层 HTTP 连接——
-/// 在 <c>ResponseHeadersRead</c> 模式下这是立即断连，比"读完剩余 body"快得多，
-/// 也是客户端断连时及时释放上游资源的正确姿势。
-/// </summary>
 public sealed class QoderStreamSession : IAsyncDisposable
 {
     private readonly HttpResponseMessage _resp;
@@ -59,14 +49,15 @@ public sealed class QoderStreamSession : IAsyncDisposable
 
     private string? _primedJson;
 
-    /// <summary>上游返回的错误（仅当 <see cref="PrimeAsync"/> 返回非 Committed 时非空）。</summary>
     public QoderUpstreamException? Error { get; private set; }
 
-    /// <summary>本次会话的用量采集器。</summary>
     public UsageCollector Usage { get; }
 
-    /// <summary>上游 event:finish 给出的首 token 耗时（毫秒），未收到则为 0。</summary>
     public long FirstTokenMs { get; private set; }
+
+    public QoderRequestIds Ids { get; }
+
+    public string ModelKey { get; }
 
     internal QoderStreamSession(
         HttpResponseMessage resp,
@@ -75,6 +66,8 @@ public sealed class QoderStreamSession : IAsyncDisposable
         CancellationToken outer,
         string accountId,
         string requestedModel,
+        string modelKey,
+        QoderRequestIds ids,
         UsageCollector usage)
     {
         _resp = resp;
@@ -83,21 +76,13 @@ public sealed class QoderStreamSession : IAsyncDisposable
         _outer = outer;
         _accountId = accountId;
         _requestedModel = requestedModel;
+        ModelKey = modelKey;
+        Ids = ids;
         Usage = usage;
     }
 
     public string AccountId => _accountId;
 
-    /// <summary>
-    /// 探测首个**有内容的业务事件**。
-    ///
-    /// 语义要点：不是"第一行"，也不是"第一个 data:"，而是第一个真正携带业务内容的
-    /// 事件——心跳行、注释行、空 body 的信封、以及事件前的空壳都要跳过。
-    ///
-    /// 为什么要有这一步：流式响应**一旦写出字节就无法再换号**（客户端会收到两段
-    /// 拼接的内容且无法察觉）。把提交点推迟到"确认首包不是错误"之后，就能在
-    /// 绝大多数账号级故障（401/403/429/模型无权限，都发生在首包）上安全地换号重试。
-    /// </summary>
     public async Task<PrimeResult> PrimeAsync(CancellationToken ct)
     {
         // 首字节超时：连首包都拿不到就换号。
@@ -155,10 +140,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// 继续读取剩余事件。**必须先发 <see cref="PrimeAsync"/> 缓存的那一帧**，
-    /// 否则首帧内容会丢。
-    /// </summary>
     public async IAsyncEnumerable<StreamEvent> ReadEventsAsync([EnumeratorCancellation] CancellationToken ct)
     {
         if (_primedJson is not null)
@@ -200,8 +181,7 @@ public sealed class QoderStreamSession : IAsyncDisposable
                 case EnvelopeKind.Error:
                 {
                     var kind = QoderErrorClassifier.Classify(parsed.HttpStatus, parsed.RawBody);
-                    throw new QoderUpstreamException(kind, parsed.HttpStatus, parsed.RawBody,
-                        $"上游流中错误（{kind}）: {Truncate(parsed.RawBody, 300)}");
+                    throw new QoderUpstreamException(kind, parsed.HttpStatus, parsed.RawBody, $"上游流中错误（{kind}）: {Truncate(parsed.RawBody, 300)}");
                 }
 
                 case EnvelopeKind.Done:
@@ -239,10 +219,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// 判断是否"纯用量 chunk"：<c>choices</c> 为空数组且带 <c>usage</c>。
-    /// 这是上游固定的收尾形态（finish_reason 之后、[DONE] 之前）。
-    /// </summary>
     private static bool IsUsageOnlyChunk(string json)
     {
         try
@@ -263,14 +239,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// 把 chunk 顶层的 <c>model</c> 改成客户端请求的模型名。
-    ///
-    /// 用 JSON 解析而非正则替换：正则 <c>"model"\s*:\s*"[^"]*"</c> 在实践中是安全的
-    /// （正文里的引号必然转义成 <c>\"</c>，而 <c>\s*:\s*</c> 跨不过反斜杠），
-    /// 但那是依赖转义规则的隐式假设；既然本来就要解析每个 chunk 采 usage，
-    /// 顺手结构化改写，成本几乎为零且不依赖假设。
-    /// </summary>
     private static string RewriteModel(string json, string model)
     {
         if (string.IsNullOrEmpty(model))
@@ -293,7 +261,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         }
     }
 
-    /// <summary>读一行，带读空闲超时（每读到一行就重置计时）。</summary>
     private async Task<string?> ReadLineAsync(CancellationToken ct)
     {
         // 读空闲超时：防上游静默挂死——客户端断连后若上游既不发数据也不断开，
@@ -311,14 +278,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         string RawBody = "",
         long FirstTokenMs = 0);
 
-    /// <summary>
-    /// 解析上游的一行。上游格式（抓包实测）：
-    /// <code>
-    /// data:{"headers":{...},"body":"&lt;内层 JSON 字符串&gt;","statusCodeValue":200,"statusCode":"OK"}
-    /// </code>
-    /// 信封固定 4 键，<c>body</c> 是**字符串**需二次解析；另有私有的
-    /// <c>event:finish</c> 事件携带 firstTokenDuration。
-    /// </summary>
     private static Envelope TryParseEnvelope(string line)
     {
         line = line.Trim();
@@ -448,13 +407,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }
 
-/// <summary>
-/// Qoder 上游代理：构造请求体、COSY 签名、发起 SSE 连接。
-///
-/// 与旧版的区别：不再"发出去就开始 yield"，而是先返回一个
-/// <see cref="QoderStreamSession"/> 让调用方探测首包——只有确认首包不是错误，
-/// 才把响应提交给客户端。这样流式请求也能在账号级故障时安全换号。
-/// </summary>
 public class QoderProxyService
 {
     private readonly IHttpClientFactory _httpFactory;
@@ -466,18 +418,16 @@ public class QoderProxyService
         _auth = auth;
     }
 
-    /// <summary>
-    /// 用指定账号发起一次 chat 请求，返回可探测的流会话。
-    /// HTTP 层错误（非 2xx）在这里就抛出带分类的异常——此时还没有任何响应字节写出。
-    /// </summary>
     public async Task<QoderStreamSession> OpenAsync(
         ChatCompletionRequest request,
         CosyCreds creds,
         string accountId,
+        QoderRequestIds? ids = null,
         CancellationToken ct = default)
     {
         var modelDef = QoderConstants.ResolveModel(request.Model);
-        var payload = BuildQoderPayload(request, modelDef);
+        var requestIds = ids ?? QoderRequestIds.New();
+        var payload = BuildQoderPayload(request, modelDef, requestIds);
 
         byte[] plainBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
         byte[] encodedBody = QoderEncoder.EncodeBody(plainBytes);
@@ -496,6 +446,7 @@ public class QoderProxyService
         req.Headers.TryAddWithoutValidation("Cosy-Scene", "app");
         req.Headers.TryAddWithoutValidation("Cache-Control", "no-cache");
         req.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         req.Content = new ByteArrayContent(encodedBody);
         req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
@@ -536,8 +487,7 @@ public class QoderProxyService
             var kind = QoderErrorClassifier.Classify(status, errBody);
             resp.Dispose();
             req.Dispose();
-            throw new QoderUpstreamException(kind, status, errBody,
-                $"Qoder 上游返回 HTTP {status}: {Truncate(errBody, 300)}");
+            throw new QoderUpstreamException(kind, status, errBody, $"Qoder 上游返回 HTTP {status}: {Truncate(errBody, 300)}");
         }
 
         var stream = await resp.Content.ReadAsStreamAsync(ct);
@@ -549,20 +499,17 @@ public class QoderProxyService
             request.Tools?.Count ?? 0);
 
         var usage = new UsageCollector(promptEstimate);
-        return new QoderStreamSession(resp, reader, linked, ct, accountId, request.Model, usage);
+        return new QoderStreamSession(resp, reader, linked, ct, accountId, request.Model,
+            modelDef.Key, requestIds, usage);
     }
 
-    /// <summary>
-    /// 兼容旧调用方的薄封装：单账号、不做首包探测。新代码请用
-    /// <see cref="OpenAsync"/> + 轮换循环。
-    /// </summary>
     public async IAsyncEnumerable<string> StreamChatAsync(
         ChatCompletionRequest request,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var creds = await _auth.GetValidCosyCredsAsync(ct);
         var acc = _auth.ActiveAccount;
-        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", ct);
+        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct);
 
         var prime = await session.PrimeAsync(ct);
         if (prime != PrimeResult.Committed)
@@ -584,16 +531,12 @@ public class QoderProxyService
         }
     }
 
-    /// <summary>
-    /// 非流式：把流式结果聚合成一个完整的 chat.completion 响应。
-    /// usage 直接采用上游真值（抓包证实上游会给出），不再像旧版那样写死 0。
-    /// </summary>
     public async Task<string> NonStreamChatAsync(ChatCompletionRequest request, CancellationToken ct = default)
     {
         var creds = await _auth.GetValidCosyCredsAsync(ct);
         var acc = _auth.ActiveAccount;
 
-        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", ct);
+        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct);
         var prime = await session.PrimeAsync(ct);
         if (prime != PrimeResult.Committed)
         {
@@ -685,14 +628,7 @@ public class QoderProxyService
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
-    /// <summary>
-    /// 构造上游请求体。
-    ///
-    /// 注意：**每次调用都生成全新的 RequestId/SessionId/ChatRecordId**。多账号重试时
-    /// 每次尝试都必须是独立会话，否则上游可能把两次尝试串进同一个会话。
-    /// 不要把这段提到重试循环外面"复用"。
-    /// </summary>
-    private static QoderPayload BuildQoderPayload(ChatCompletionRequest request, QoderConstants.QoderModelDefinition modelDef)
+    private static QoderPayload BuildQoderPayload( ChatCompletionRequest request, QoderConstants.QoderModelDefinition modelDef, QoderRequestIds ids)
     {
         StringBuilder sysSb = new();
         List<QoderMessageItem> qoderMsgs = [];
@@ -727,15 +663,12 @@ public class QoderProxyService
             });
         }
 
-        string recordId = Guid.NewGuid().ToString("N")[..16];
-        string sessionId = Guid.NewGuid().ToString("N")[..16];
-
         return new QoderPayload
         {
-            RequestId = Guid.NewGuid().ToString(),
-            RequestSetId = recordId,
-            ChatRecordId = recordId,
-            SessionId = sessionId,
+            RequestId = ids.RequestId,
+            RequestSetId = ids.RequestSetId,
+            ChatRecordId = ids.ChatRecordId,
+            SessionId = ids.SessionId,
             Stream = true,
             ChatTask = "FREE_INPUT",
             IsReply = true,

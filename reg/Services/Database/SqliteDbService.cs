@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using reg.Models;
 using reg.Services.Qoder;
@@ -8,14 +9,13 @@ public class SqliteDbService
 {
     private readonly IDbContextFactory<AppDbContext> _factory;
 
-    public SqliteDbService(IDbContextFactory<AppDbContext> factory)
+    public SqliteDbService(IDbContextFactory<AppDbContext> factory, ILogger<SqliteDbService> log)
     {
         _factory = factory;
         using var db = _factory.CreateDbContext();
-        AppDbContext.InitializeDatabase(db);
+        AppDbContext.InitializeDatabase(db, log);
     }
 
-    // --- Accounts Repository ---
 
     public List<AccountRecord> GetAllAccounts()
     {
@@ -131,8 +131,6 @@ public class SqliteDbService
         }
     }
 
-    // --- Proxy API Keys Repository ---
-
     public List<ApiKeyRecord> GetAllKeys()
     {
         using var db = _factory.CreateDbContext();
@@ -155,17 +153,6 @@ public class SqliteDbService
         return false;
     }
 
-    /// <summary>
-    /// 按密钥值查活跃 Key 的完整记录（含 <see cref="ApiKeyRecord.AccountId"/> 绑定）。
-    ///
-    /// 相比 <see cref="ValidateKey"/> 多返回记录本身——号池需要 AccountId 才能实现
-    /// 「API Key 粘性绑定账号」。旧的 bool 版本拿不到绑定关系，导致 AccountId
-    /// 长期是个死字段（建了但从没被读过）。
-    /// </summary>
-    /// <param name="touch">
-    /// 是否顺带更新 LastUsedAt。调用方可以按节流策略传 false，避免每个请求
-    /// 都产生一次写事务（SQLite 写是 fsync 级的开销）。
-    /// </param>
     public ApiKeyRecord? FindActiveKey(string keyValue, bool touch = true)
     {
         using var db = _factory.CreateDbContext();
@@ -184,7 +171,6 @@ public class SqliteDbService
         return key;
     }
 
-    /// <summary>清除所有指向该账号的 Key 绑定（删除账号时调用，避免留下悬空绑定）。</summary>
     public void ClearKeyBindings(string accountId)
     {
         using var db = _factory.CreateDbContext();
@@ -247,7 +233,6 @@ public class SqliteDbService
         }
     }
 
-    // --- Usage Records Repository ---
 
     public void LogUsage(UsageRecord u)
     {
@@ -272,7 +257,6 @@ public class SqliteDbService
         db.UsageRecords.ExecuteDelete();
     }
 
-    // --- Settings Repository ---
 
     public string? GetSetting(string key)
     {
@@ -296,11 +280,6 @@ public class SqliteDbService
         }
         db.SaveChanges();
     }
-
-    // --- Account Pool State Repository ---
-    //
-    // account_pool_states 刻意**不进 EF 模型**（见 SchemaPatches 的说明），
-    // 所以这里走原生 SQL。这些方法只应由后台 flusher 调用——绝不在请求路径上。
 
     public Dictionary<string, PoolStateRecord> GetAllPoolStates()
     {
@@ -364,10 +343,6 @@ public class SqliteDbService
         return result;
     }
 
-    /// <summary>
-    /// 批量落盘池状态（单事务，避免 N 次 fsync）。整体替换语义：每个账号一行，
-    /// 用 INSERT OR REPLACE。调用方（QoderPool.FlushIfDirty）保证传入的是全量快照。
-    /// </summary>
     public void SavePoolStates(IReadOnlyList<PoolStateRecord> states)
     {
         if (states.Count == 0)
@@ -473,7 +448,6 @@ public class SqliteDbService
         }
     }
 
-    /// <summary>删除账号时一并清掉它的池状态（否则残留行会被下次同名 id 复用）。</summary>
     public void DeletePoolState(string accountId)
     {
         using var db = _factory.CreateDbContext();

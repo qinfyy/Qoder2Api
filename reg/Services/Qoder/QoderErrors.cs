@@ -2,94 +2,56 @@ using System.Text.RegularExpressions;
 
 namespace reg.Services.Qoder;
 
-/// <summary>
-/// 上游错误的分类。号池据此决定「罚不罚、罚多久、换不换号」。
-///
-/// 设计纪律（借自同类反代项目的骨架）：**分类只有一个入口 <see cref="QoderErrorClassifier.Classify"/>**，
-/// 禁止在 endpoint / 代理层散写 if-else 判错误。新增错误形态一律改本文件。
-///
-/// 现实约束：抓包样本里**没有任何错误响应**（两个 HAR 的 statusCodeValue 全是 200，
-/// 也没有 4xx/5xx 样本）。所以分类表是按「HTTP 状态码 + 信封 + 关键词」结构化推断的，
-/// 不是从真实业务码反推的。判不出的形态一律落 <see cref="QoderErrorKind.Client"/>
-/// （只换号不重罚）并打日志，便于后续据日志补表。
-/// </summary>
 public enum QoderErrorKind
 {
     /// <summary>不是错误。</summary>
     None = 0,
 
-    /// <summary>限流（429 / rate limit 文案）。软冷却，冷却时长对齐上游重置墙钟。</summary>
+    /// <summary>限流。</summary>
     SoftRate,
 
-    /// <summary>
-    /// 服务排队/繁忙（上游 403 + 10605 + <c>isQueued</c>）。
-    ///
-    /// **实测样本**（2026-09-24 真实抓到的响应体）：
-    /// <code>
-    /// {"code":"403","message":"{\"code\":\"10605\",\"message\":\"{\\\"isQueued\\\":true,
-    ///  \\\"modelKey\\\":\\\"auto\\\",\\\"queueCount\\\":0,\\\"queueType\\\":\\\"p3\\\",
-    ///  \\\"retryAfterSeconds\\\":30,\\\"serviceAvailable\\\":false,\\\"waitTime\\\":30}\"}"}
-    /// </code>
-    ///
-    /// 这条样本推翻了「403 = 账号被封」的直觉假设：Qoder 用 403 表达**服务级繁忙**，
-    /// 与账号健康无关。若按封号处理，会把完全健康的账号冷却 2 小时，
-    /// 一次上游高峰就能把整个号池打成不可用。
-    ///
-    /// 处置：按上游给的 <c>retryAfterSeconds</c> 短冷却（拿不到就退避），
-    /// 换号继续（其他账号未必在排队）；**不计入账号失败统计**——账号没做错任何事。
-    /// </summary>
+    /// <summary> 模型排队 </summary>
+    ModelQueued,
+
+    /// <summary> 服务排队/繁忙 </summary>
     ServiceBusy,
 
-    /// <summary>额度/余额耗尽（402 / quota 文案）。硬冷却到次日签到，期间不参与兜底。</summary>
+    /// <summary>额度/余额耗尽。</summary>
     HardCredit,
 
-    /// <summary>模型级限流：账号本身健康，只有该模型不可用。写模型级冷却，切模型即豁免。</summary>
+    /// <summary>模型级限流。</summary>
     ModelRateLimit,
 
-    /// <summary>会话失效（401 / session not found）。连续若干次才判定账号死亡。</summary>
+    /// <summary>会话失效。</summary>
     SessionDead,
 
-    /// <summary>上游偶发 404。固定短冷却，不按限流退避升级（路径缺失不是限流信号）。</summary>
+    /// <summary>上游 404。</summary>
     NotFound,
 
-    /// <summary>上游 5xx。喂熔断器，指数退避。</summary>
+    /// <summary>上游 5xx。</summary>
     Server,
 
-    /// <summary>
-    /// 传输层失败：连不上上游（DNS/连接被拒/TLS 握手失败/超时）。
-    ///
-    /// 实测触发场景：上游网络抖动时 <c>SSL connection could not be established</c>。
-    /// 这类失败与**账号**无关——同一时刻换任何账号都一样连不上。
-    ///
-    /// 处置：喂连败计数（连续多次说明本机到上游的链路有问题，该账号暂时别用），
-    /// 但**不计入账号的成功率**。否则一次网络抖动就会永久拉低该账号的选号权重，
-    /// 而它其实完全健康。
-    /// </summary>
+    /// <summary> 传输层失败。</summary>
     Transport,
 
-    /// <summary>账号级授权/风控故障（403 / forbidden / banned）。长冷却，不自动复活。</summary>
+    /// <summary>账号级授权/风控故障。</summary>
     AccountFault,
 
-    /// <summary>内容策略拦截。**请求的问题不是账号的问题**——零动作、不轮转，原文透传。</summary>
+    /// <summary>内容策略拦截。</summary>
     ContentBlocked,
 
-    /// <summary>请求体本身有问题（参数错误）。不罚号，但**仍轮转**（不同账号模型权限可能不同）。</summary>
+    /// <summary>请求体本身有问题。</summary>
     BadParams,
 
-    /// <summary>上下文超长。**请求的问题不是账号的问题**——零动作、不轮转，原文透传。</summary>
+    /// <summary>上下文超长。</summary>
     PromptTooLong,
 
-    /// <summary>其余 4xx 或无法归类的错误。只换号不重罚，喂连败计数兜底。</summary>
+    /// <summary>其余 4xx 或无法归类的错误。</summary>
     Client,
 }
 
 public static class QoderErrorKindExtensions
 {
-    /// <summary>
-    /// 是否应该换一个账号重试。
-    /// 内容拦截与上下文超长是**请求级**问题——同一个 body 换任何号都会得到相同结果，
-    /// 轮转只是白白消耗其他账号的配额，且会把真实错误掩盖成"全部账号不可用"。
-    /// </summary>
     public static bool IsRetryable(this QoderErrorKind kind) => kind switch
     {
         QoderErrorKind.ContentBlocked => false,
@@ -98,32 +60,24 @@ public static class QoderErrorKindExtensions
         _ => true,
     };
 
-    /// <summary>
-    /// 是否要对该账号施加惩罚（冷却/熔断/降权）。
-    /// 「请求的问题」类错误（内容拦截/上下文超长/参数错误）**不罚号**——账号没做错任何事。
-    /// </summary>
     public static bool PenalizesAccount(this QoderErrorKind kind) => kind switch
     {
         QoderErrorKind.ContentBlocked => false,
         QoderErrorKind.PromptTooLong => false,
         QoderErrorKind.BadParams => false,
         QoderErrorKind.None => false,
+        // 排队是正常状态，不是账号的错——惩罚它只会把健康账号冷却掉，
+        // 反而逼着请求去换号、丢 prompt 缓存。
+        QoderErrorKind.ModelQueued => false,
         _ => true,
     };
 
-    /// <summary>
-    /// 是否把这次失败计入**账号的**失败统计（err_total / 成功率 EMA）。
-    ///
-    /// 与 <see cref="PenalizesAccount"/> 的区别在于"要不要短暂避让"与"算不算账号的锅"
-    /// 是两件事：<see cref="QoderErrorKind.ServiceBusy"/> 需要短冷却（避免继续打一个
-    /// 正在排队的服务），但那是**服务级**状况、账号本身完全健康，记到账号头上会让
-    /// 它的成功率被上游高峰永久拉低。
-    /// </summary>
     public static bool CountsAsAccountFailure(this QoderErrorKind kind) => kind switch
     {
-        // 服务级繁忙与传输层失败都不是账号的锅，不该污染它的成功率。
+        // 服务级繁忙、传输层失败、模型排队都不是账号的锅，不该污染它的成功率。
         QoderErrorKind.ServiceBusy => false,
         QoderErrorKind.Transport => false,
+        QoderErrorKind.ModelQueued => false,
         _ => kind.PenalizesAccount(),
     };
 
@@ -131,6 +85,7 @@ public static class QoderErrorKindExtensions
     {
         QoderErrorKind.SoftRate => "rate_limit_exceeded",
         QoderErrorKind.ServiceBusy => "service_busy",
+        QoderErrorKind.ModelQueued => "model_queued",
         QoderErrorKind.HardCredit => "insufficient_quota",
         QoderErrorKind.ModelRateLimit => "model_rate_limited",
         QoderErrorKind.SessionDead => "session_expired",
@@ -145,17 +100,12 @@ public static class QoderErrorKindExtensions
     };
 }
 
-/// <summary>
-/// 带分类的上游错误。代理层抛出它，endpoint 据此决定轮换与惩罚。
-/// </summary>
 public sealed class QoderUpstreamException : Exception
 {
     public QoderErrorKind Kind { get; }
 
-    /// <summary>HTTP 状态码（信封内错误时为 null，因为那时 HTTP 本身是 200）。</summary>
     public int? HttpStatus { get; }
 
-    /// <summary>上游原始响应体（透传给客户端时用原文，不加工）。</summary>
     public string RawBody { get; }
 
     public QoderUpstreamException(QoderErrorKind kind, int? httpStatus, string rawBody, string message)
@@ -169,9 +119,7 @@ public sealed class QoderUpstreamException : Exception
 
 public static class QoderErrorClassifier
 {
-    // ---- 关键词表（统一小写比较；中文按原文比较）----
-
-    /// <summary>额度耗尽。命中的都是"计费余额没了"，与"限流"是两回事。</summary>
+    // 额度耗尽。</summary>
     private static readonly string[] HardCreditMarkers =
     [
         "insufficient credit", "insufficient_quota", "no credit", "credit exhausted",
@@ -180,11 +128,7 @@ public static class QoderErrorClassifier
         "积分不足", "额度不足", "余额不足", "积分用完", "额度用尽", "没有积分", "配额不足",
     ];
 
-    /// <summary>
-    /// 限流。注意 "usage limit" 归这里（用量节流），不归余额。
-    /// **刻意不收裸 "too many"**：它会命中 "too many tokens"（那是上下文超长，
-    /// 属请求级错误、不该罚号），只收完整短语 "too many requests"。
-    /// </summary>
+    // 限流。
     private static readonly string[] SoftRateMarkers =
     [
         "rate limit", "rate-limit", "ratelimit", "too many requests",
@@ -192,12 +136,7 @@ public static class QoderErrorClassifier
         "请求过于频繁", "限流", "频繁", "稍后重试",
     ];
 
-    /// <summary>
-    /// 模型级限流的**窄短语**：必须与"账号整体被限"区分开。
-    /// 刻意不收裸 "model"/"模型"——几乎所有错误文案都可能提到模型，
-    /// 那会把账号级限流误判成模型级，进而错误地给出"切模型豁免"。
-    /// 只收明确表达「是这个模型被限」的短语。
-    /// </summary>
+    // 模型级限流
     private static readonly string[] ModelRateLimitMarkers =
     [
         "model rate limit", "model is rate limited", "this model", "model usage limit",
@@ -205,10 +144,7 @@ public static class QoderErrorClassifier
         "该模型", "模型限流", "模型达到上限", "当前模型",
     ];
 
-    /// <summary>
-    /// 服务排队/繁忙的标记（实测样本 code 10605）。命中即说明"服务忙"而非"账号坏"，
-    /// 必须优先于 403→封号 的判定。
-    /// </summary>
+    // 服务排队/繁忙的标记（实测样本 code 10605）。
     private static readonly string[] ServiceBusyMarkers =
     [
         "isqueued", "serviceavailable", "retryafterseconds", "waittime",
@@ -216,7 +152,7 @@ public static class QoderErrorClassifier
         "排队", "服务繁忙", "稍后重试",
     ];
 
-    /// <summary>会话失效。</summary>
+    // 会话失效。
     private static readonly string[] SessionDeadMarkers =
     [
         "session not found", "session expired", "session is invalid", "offline user session",
@@ -224,7 +160,7 @@ public static class QoderErrorClassifier
         "会话失效", "登录已过期", "凭证过期",
     ];
 
-    /// <summary>账号级授权/风控。</summary>
+    // 账号级授权/风控。
     private static readonly string[] AccountFaultMarkers =
     [
         "forbidden", "request illegal", "banned", "not activated", "account suspended",
@@ -232,7 +168,7 @@ public static class QoderErrorClassifier
         "账号被封", "账号异常", "未激活",
     ];
 
-    /// <summary>内容策略拦截。</summary>
+    // 内容策略拦截。
     private static readonly string[] ContentBlockedMarkers =
     [
         "content policy", "security policy", "blocked by", "content filter",
@@ -240,7 +176,7 @@ public static class QoderErrorClassifier
         "内容审核", "违规", "敏感",
     ];
 
-    /// <summary>上下文超长。</summary>
+    // 上下文超长。
     private static readonly string[] PromptTooLongMarkers =
     [
         "prompt is too long", "context length", "too many tokens", "maximum context",
@@ -248,7 +184,7 @@ public static class QoderErrorClassifier
         "上下文超长", "超出长度",
     ];
 
-    /// <summary>参数错误。</summary>
+    // 参数错误。
     private static readonly string[] BadParamsMarkers =
     [
         "unmarshal", "invalid request", "invalid parameter", "missing required",
@@ -256,35 +192,34 @@ public static class QoderErrorClassifier
         "参数错误", "格式错误",
     ];
 
-    /// <summary>上游「将在 … 重置」的中文墙钟文案。</summary>
+    // 上游「将在 … 重置」的中文文案。
     private static readonly Regex ResetCn = new(@"将在\s*(.+?)\s*重置", RegexOptions.Compiled);
 
-    /// <summary>上游「reset at YYYY-MM-DD HH:MM:SS」的英文墙钟文案。</summary>
+    // 上游「reset at YYYY-MM-DD HH:MM:SS」的英文墙钟文案。
     private static readonly Regex ResetEn = new(
         @"reset\s+at\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    /// <summary>
-    /// 单一分类入口。
-    /// </summary>
-    /// <param name="httpStatus">HTTP 状态码；信封内错误传 null（此时 HTTP 是 200）。</param>
-    /// <param name="body">上游响应体原文。</param>
+    // 单一分类入口。
     public static QoderErrorKind Classify(int? httpStatus, string? body)
     {
         string lower = (body ?? string.Empty).ToLowerInvariant();
         string raw = body ?? string.Empty;
 
-        // 判定顺序即优先级，自上而下短路。顺序是有讲究的：
-        // 「余额耗尽」必须先于「限流」——429 也可能带 quota 文案，那种情况罚得该更重。
 
         if (ContainsAny(lower, raw, HardCreditMarkers) || httpStatus == 402)
         {
             return QoderErrorKind.HardCredit;
         }
 
-        // 服务排队/繁忙必须**先于** AccountFault 判定。
-        // 实测：Qoder 用 403 表达服务级排队（code 10605 + isQueued），
-        // 若按 403→封号 处理，一次上游高峰就会把健康账号冷却 2 小时、整个池打成不可用。
+        // 必须先于 AccountFault 判定：Qoder 用 403 表达服务级排队，
+        // 按封号处理会让一次上游高峰把整个池冷却 2 小时。
+        // 用结构化解析而非子串匹配，避免被正文里偶然出现的同名串误导。
+        if (QoderQueueParser.HasModelQueuedCode(raw) || QoderQueueParser.Parse(raw)?.IsQueued == true)
+        {
+            return QoderErrorKind.ModelQueued;
+        }
+
         if (ContainsAny(lower, raw, ServiceBusyMarkers))
         {
             return QoderErrorKind.ServiceBusy;
@@ -359,12 +294,6 @@ public static class QoderErrorClassifier
         return QoderErrorKind.None;
     }
 
-    /// <summary>
-    /// 从限流响应里解析上游给出的**权威重置时刻**。
-    ///
-    /// 这是「指数退避把全池推到封顶」的根治办法：上游明确说了什么时候恢复，
-    /// 就该精确对齐那个墙钟，而不是盲目翻倍。判不出返回 null，由调用方退避。
-    /// </summary>
     public static DateTimeOffset? ParseRateReset(string? body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -409,10 +338,6 @@ public static class QoderErrorClassifier
         return null;
     }
 
-    /// <summary>
-    /// 从服务排队响应里解析上游明示的等待秒数（<c>retryAfterSeconds</c>）。
-    /// 这是上游给的权威避让时长，比本地退避猜测准确。判不出返回 null。
-    /// </summary>
     public static int? ParseRetryAfterSeconds(string? body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -450,7 +375,5 @@ public static class QoderErrorClassifier
 
 internal static class StringTrimExtensions
 {
-    /// <summary>仅当以后缀结尾时移除（string.TrimSuffix 在 .NET 里不存在）。</summary>
-    public static string TrimSuffix(this string s, string suffix) =>
-        s.EndsWith(suffix, StringComparison.Ordinal) ? s[..^suffix.Length] : s;
+    public static string TrimSuffix(this string s, string suffix) => s.EndsWith(suffix, StringComparison.Ordinal) ? s[..^suffix.Length] : s;
 }

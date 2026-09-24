@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<models>
+
+  <model key="qmodel_38max">
+    <displayName>Qwen3.8-Max</displayName>
+    <description>千问最新一代基座模型，2.4 万亿参数，在代码工程、专业办公、深度推理等核心场景全面领先</description>
+    <isReasoning>true</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>180000</maxInputTokens>
+    <aliases>
+      <alias>qwen3.8-max</alias>
+      <alias>qwen-3.8-max</alias>
+      <alias>qwen3.8max</alias>
+      <alias>qwen-max</alias>
+      <alias>qwen-max-latest</alias>
+    </aliases>
+  </model>
+
+  <model key="qfmodel">
+    <displayName>Qwen3.8-Flash</displayName>
+    <description>千问开源权重的多模态 MoE 模型，在能力、延迟与成本间取得出色平衡</description>
+    <isReasoning>true</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>180000</maxInputTokens>
+    <aliases>
+      <alias>qwen3.8-flash</alias>
+      <alias>qwen-3.8-flash</alias>
+      <alias>qwen3.8flash</alias>
+      <alias>qwen-flash</alias>
+      <alias>qwen-flash-latest</alias>
+    </aliases>
+  </model>
+
+  <model key="qmodel_latest">
+    <displayName>Qwen3.7-Max</displayName>
+    <description>千问旗舰模型，具备顶尖智能体执行能力，可自主完成长达 35 小时的复杂任务</description>
+    <isReasoning>true</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>180000</maxInputTokens>
+    <aliases>
+      <alias>qwen3.7-max</alias>
+      <alias>qwen-3.7-max</alias>
+      <alias>qwen3.7max</alias>
+    </aliases>
+  </model>
+
+  <model key="qmodel">
+    <displayName>Qwen3.7-Plus</displayName>
+    <description>千问旗舰模型，增强推理和智能体能力，擅长编程与复杂问题解决</description>
+    <isReasoning>true</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>180000</maxInputTokens>
+    <aliases>
+      <alias>qwen3.7-plus</alias>
+      <alias>qwen-3.7-plus</alias>
+      <alias>qwen3.7plus</alias>
+      <alias>qwen-plus</alias>
+      <alias>qwen</alias>
+    </aliases>
+  </model>
+
+  <model key="dmodel">
+    <displayName>DeepSeek-V4-Pro</displayName>
+    <description>深度求索正式版模型（DeepSeek-V4-Pro-0813），Agent 能力、世界知识与推理性能全面领先。</description>
+    <isReasoning>true</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>deepseek-v4-pro</alias>
+      <alias>deepseek-r1</alias>
+      <alias>deepseek-reasoner</alias>
+      <alias>deepseek-v4</alias>
+      <alias>r1</alias>
+    </aliases>
+  </model>
+
+  <model key="dfmodel">
+    <displayName>DeepSeek-V4-Flash</displayName>
+    <description>深度求索正式版模型（DeepSeek-V4-Flash-0731），Agent 能力、世界知识与推理性能全面领先。</description>
+    <isReasoning>false</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>deepseek-v4-flash</alias>
+      <alias>deepseek-v3</alias>
+      <alias>deepseek-chat</alias>
+      <alias>v3</alias>
+    </aliases>
+  </model>
+
+  <model key="kmodel_latest">
+    <displayName>Kimi-K3</displayName>
+    <description>Kimi 迄今最强模型：2.8 万亿参数，面向软件工程、知识工作与深度推理而生</description>
+    <isReasoning>true</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>200000</maxInputTokens>
+    <aliases>
+      <alias>kimi-k3</alias>
+      <alias>kimi-latest</alias>
+    </aliases>
+  </model>
+
+  <model key="kmodel">
+    <displayName>Kimi-K2.7-Code</displayName>
+    <description>专为长上下文编程打造：精准遵循指令，可靠执行长链路任务</description>
+    <isReasoning>false</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>200000</maxInputTokens>
+    <aliases>
+      <alias>kimi-k2.7-code</alias>
+      <alias>kimi-k2.7</alias>
+      <alias>kimi-k2.5</alias>
+      <alias>kimi</alias>
+    </aliases>
+  </model>
+
+  <model key="gmodel">
+    <displayName>GLM-5.3</displayName>
+    <description>智谱旗舰模型，擅长复杂系统工程与长程任务</description>
+    <isReasoning>true</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>glm-5.3</alias>
+      <alias>glm-5</alias>
+      <alias>glm-4</alias>
+      <alias>glm</alias>
+    </aliases>
+  </model>
+
+  <model key="gfmodel">
+    <displayName>GLM-5.3-Flash</displayName>
+    <description>智谱全新原生多模态模型，深度理解图像与视频，自主完成研究分析、文档制作等复杂任务</description>
+    <isReasoning>false</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>glm-5.3-flash</alias>
+      <alias>glm-flash</alias>
+    </aliases>
+  </model>
+
+  <model key="mmodel">
+    <displayName>MiniMax-M3</displayName>
+    <description>原生多模态感知、前沿编码能力与 1M 上下文，驾驭高复杂度工作流</description>
+    <isReasoning>true</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>1000000</maxInputTokens>
+    <aliases>
+      <alias>minimax-m3</alias>
+      <alias>minimax</alias>
+      <alias>minimax-m2.5</alias>
+    </aliases>
+  </model>
+
+  <model key="cmodel">
+    <displayName>Cantus</displayName>
+    <description>尝鲜体验全球顶级模型，擅长超长自主任务执行</description>
+    <isReasoning>true</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>cantus</alias>
+      <alias>cmodel</alias>
+    </aliases>
+  </model>
+
+  <model key="auto">
+    <displayName>Auto</displayName>
+    <description>智能选择最适合的模型，平衡性能与成本</description>
+    <isReasoning>false</isReasoning>
+    <isVl>true</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>default</alias>
+      <alias>qoder</alias>
+    </aliases>
+  </model>
+
+  <model key="ultimate">
+    <displayName>Ultimate</displayName>
+    <description>专家级深度推理与思考能力，极致输出质量。</description>
+    <isReasoning>true</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>极致</alias>
+      <alias>qoder-ultimate</alias>
+    </aliases>
+  </model>
+
+  <model key="performance">
+    <displayName>Performance</displayName>
+    <description>高级推理能力，高质量输出</description>
+    <isReasoning>false</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>性能</alias>
+      <alias>qoder-performance</alias>
+    </aliases>
+  </model>
+
+  <model key="efficient">
+    <displayName>Efficient</displayName>
+    <description>标准推理能力，高性价比</description>
+    <isReasoning>false</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>经济</alias>
+      <alias>qoder-efficient</alias>
+    </aliases>
+  </model>
+
+  <model key="lite">
+    <displayName>Lite</displayName>
+    <description>基础推理能力，免费使用（高峰期可能响应较慢）</description>
+    <isReasoning>false</isReasoning>
+    <isVl>false</isVl>
+    <maxInputTokens>128000</maxInputTokens>
+    <aliases>
+      <alias>轻量</alias>
+      <alias>qoder-lite</alias>
+    </aliases>
+  </model>
+
+</models>

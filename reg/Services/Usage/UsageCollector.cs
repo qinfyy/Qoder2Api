@@ -5,19 +5,9 @@ using reg.Models;
 namespace reg.Services.Usage;
 
 /// <summary>
-/// 在一次 chat 请求的生命周期内采集用量，最后装配成 OpenAI 规范的 usage 对象。
-///
-/// **三档优先级**（高到低）：
-///   1. 上游 SSE 的 <c>usage</c> 对象 —— 抓包证实 Qoder 每条流都会给，
-///      位置固定在 <c>finish_reason:stop</c> 之后、<c>[DONE]</c> 之前，
-///      特征是 <c>"choices":[]</c>；
-///   2. 上游给的 <c>credits</c>（计费额，非 token 数）—— 记录到台账但不当作 token 数；
-///   3. <see cref="TokenEstimator"/> 本地估算 —— 仅在 1 缺失时兜底，且**明确标注来源**。
-///
-/// **哨兵原则**：没观测到就留 null，绝不写 0。"测得 0 个 token" 与 "没观测到 token"
-/// 是两回事，混淆会伪造出看起来正常、实则无意义的统计。
-///
-/// 线程模型：每个请求一个实例，只在单个消费循环里使用，无需加锁。
+/// 采集一次请求的用量，装配成 OpenAI 规范的 usage。优先级：上游 usage &gt; credits &gt; 本地估算。
+/// 哨兵原则：没观测到留 null，绝不写 0（"测得 0" 与 "没观测到" 是两回事）。
+/// 每请求一个实例，单消费循环使用，无需加锁。
 /// </summary>
 public sealed class UsageCollector
 {
@@ -110,12 +100,8 @@ public sealed class UsageCollector
     }
 
     /// <summary>
-    /// 把上游的 usage 对象解析成 <see cref="UsageInfo"/>。
-    ///
-    /// 容错要点（都来自抓包实测）：
-    ///   - <c>completion_tokens_details</c> **9 条流里有 4 条整体缺失**，不能假设存在；
-    ///   - <c>credits</c> 是浮点，可能是 0.0（缓存命中/不计费）；
-    ///   - 各 token 字段本身也可能缺失，缺失一律留 null（哨兵原则）。
+    /// 解析上游 usage。字段可能整体缺失（实测 9 条流有 4 条没有 completion_tokens_details），
+    /// 缺失一律留 null。
     /// </summary>
     public static UsageInfo ParseUsage(JsonElement usage)
     {

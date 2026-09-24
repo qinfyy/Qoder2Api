@@ -8,13 +8,10 @@ public static class AdminApiRoutes
 {
     public static void MapAdminApiRoutes(this IEndpointRouteBuilder app)
     {
-        // --- Accounts ---
         app.MapGet("/api/accounts", (QoderAuthService auth) =>
         {
             return Results.Ok(auth.Database.GetAllAccounts());
         });
-
-        // --- Account Pool ---
 
         /// 号池总览 + 各账号的池状态台账（脱敏：不含任何凭证字段）。
         app.MapGet("/api/pool/status", (QoderPool pool) => Results.Ok(pool.Snapshot()));

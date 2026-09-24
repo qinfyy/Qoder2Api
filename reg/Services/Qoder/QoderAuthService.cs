@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,22 +20,17 @@ public class QoderAuthService
 {
     private readonly IHttpClientFactory _httpFactory;
     private readonly SqliteDbService _db;
+    private readonly ILogger<QoderAuthService> _log;
     private readonly Lock _lock = new();
 
     public event Action? OnAuthStateChanged;
 
-    public QoderAuthService(IHttpClientFactory httpFactory, SqliteDbService db)
+    public QoderAuthService(IHttpClientFactory httpFactory, SqliteDbService db, ILogger<QoderAuthService> log)
     {
         _httpFactory = httpFactory;
         _db = db;
+        _log = log;
     }
-
-    /// <summary>
-    /// 每次取用都向工厂要一个新的 HttpClient 包装（底层 handler 由工厂池化复用）。
-    /// 本服务是 Singleton，**不能**在构造时捕获 HttpClient 实例——那会把一个
-    /// Transient 的 HttpClient 连同其 handler 永久捕获，导致 handler 轮换失效、
-    /// DNS 变更不生效。
-    /// </summary>
     private HttpClient Http => _httpFactory.CreateClient(QoderHttp.ClientName);
 
     public SqliteDbService Database => _db;
@@ -206,22 +202,6 @@ public class QoderAuthService
         return true;
     }
 
-    // --- PAT Flow ---
-
-    /// <summary>
-    /// 用 PAT 换取 JobToken 并落库。
-    ///
-    /// <paramref name="targetAccountId"/> 是**续期**路径的关键：非空时表示"更新这条
-    /// 已有账号"，为空才是"新增账号"。
-    ///
-    /// 旧实现在这里有个严重缺陷（已修）：无论新增还是续期，它都
-    /// <c>Id = Guid.NewGuid()</c> 造一条新记录，于是
-    ///   1. 每续期一次数据库就多一条僵尸账号（带着过期 token，号池还会选中它）；
-    ///   2. 调用方紧接着 <c>GetAccountById(旧Id)</c> 拿回的是**旧行、旧 token**，
-    ///      本次请求继续用过期凭证——续期等于没做。
-    /// 现在改为按 targetAccountId 就地 upsert，并把更新后的记录**返回**给调用方
-    /// （调用方不该再查库）。
-    /// </summary>
     public async Task<AccountRecord> ConnectPatAsync(string pat, string? targetAccountId = null, CancellationToken ct = default)
     {
         pat = pat.Trim();
@@ -332,15 +312,6 @@ public class QoderAuthService
         return (token, DateTimeOffset.UtcNow.AddMilliseconds(expiresInMs));
     }
 
-    // --- Credential Resolution ---
-
-    /// <summary>
-    /// 取指定账号的签名凭证（号池选完号后调用）。PAT 临近过期时顺带续期。
-    ///
-    /// 刻意**不做** <c>TouchAccountUsage</c>（更新 accounts.LastUsedAt）：那是每个请求
-    /// 一次 SQLite 写事务，在号池的高频路径上是纯负担。最近使用时间由号池在内存里
-    /// 跟踪并透出（见 PoolAccountStatus.LastUsedMs），不再写库。
-    /// </summary>
     public async Task<CosyCreds> GetCredsForAccountAsync(AccountRecord acc, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(acc.UserId) || string.IsNullOrEmpty(acc.JobToken))
@@ -364,7 +335,7 @@ public class QoderAuthService
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[QoderAuthService] PAT refresh failed: {ex.Message}");
+                    _log.LogWarning(ex, "PAT 续期失败，本次继续用旧凭证");
                 }
             }
             else if (acc.ExpiresAt.Value <= DateTimeOffset.UtcNow)
@@ -383,10 +354,6 @@ public class QoderAuthService
         );
     }
 
-    /// <summary>
-    /// 兼容入口：取「首选账号」的凭证。号池接管路由后，请求路径不再用它
-    /// （改走 <see cref="GetCredsForAccountAsync"/>），保留供单账号/管理场景使用。
-    /// </summary>
     public async Task<CosyCreds> GetValidCosyCredsAsync(CancellationToken ct = default)
     {
         var acc = _db.GetActiveAccount();
