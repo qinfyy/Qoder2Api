@@ -6,6 +6,7 @@
 @using Qoder2Api.Services.Qoder
 @inject QoderAuthService AuthService
 @inject QoderPool Pool
+@inject QoderCreditsService CreditsService
 @inject IJSRuntime JS
 @implements IDisposable
 
@@ -92,6 +93,15 @@
                     <th>显示名 / 邮箱</th>
                     <th>认证方式</th>
                     <th>套餐 / 额度状态</th>
+                    <th>
+                        Credits
+                        <button type="button" class="btn secondary"
+                                style="font-size: 0.68rem; padding: 0 0.3rem; margin-left: 0.2rem;"
+                                title="重新拉取 Credits（余额 / 年消耗 / 活跃天数）"
+                                disabled="@creditsLoading" @onclick="() => LoadCreditsAsync(force: true)">
+                            @(creditsLoading ? "…" : "↻")
+                        </button>
+                    </th>
                     <th>凭证有效至</th>
                     <th>池状态</th>
                     <th>成功率</th>
@@ -104,7 +114,7 @@
                 @if (accounts.Count == 0)
                 {
                     <tr>
-                        <td colspan="9" class="muted" style="text-align: center; padding: 2rem;">
+                        <td colspan="10" class="muted" style="text-align: center; padding: 2rem;">
                             还没有已保存的 Qoder 账户。点击右上角“新增账户”通过 OAuth 或 PAT 连接。
                         </td>
                     </tr>
@@ -143,6 +153,75 @@
                                 </div>
                             </div>
                         </td>
+                        <!-- Credits：余额 / 近一年消耗 / 活跃天数，来自 openapi.qoder.sh（见 QoderCreditsService） -->
+                        <td style="font-size: 0.78rem; white-space: nowrap;">
+                            @{
+                                var cr = CreditsOf(acc.Id);
+                            }
+                            @if (cr is null)
+                            {
+                                <span class="muted">@(creditsLoading ? "加载中…" : "—")</span>
+                            }
+                            else if (cr.PlanTotal is null && cr.TotalCredits is null && cr.TotalActiveDays is null)
+                            {
+                                <span class="muted" title="@(cr.Error ?? "无数据")">—</span>
+                            }
+                            else
+                            {
+                                @if (cr.PlanTotal is { } planTotal)
+                                {
+                                    <div title="套餐内 Credits：剩余 / 总量">
+                                        <span style="font-weight: 600; color: var(--ink);">@Fmt(cr.PlanRemaining)</span><span class="muted"> / @Fmt(planTotal)</span>
+                                    </div>
+                                }
+                                @if (cr.AddOnTotal is { } addOnTotal)
+                                {
+                                    <div class="muted" style="font-size: 0.7rem;" title="资源包（Add-on）：剩余 / 总量">
+                                        包 @Fmt(cr.AddOnRemaining) / @Fmt(addOnTotal)
+                                    </div>
+                                }
+                                @if (cr.TotalCredits is { } yearUsed)
+                                {
+                                    <div class="muted" style="font-size: 0.7rem;" title="近一年消耗 / 日峰值">
+                                        年耗 @Fmt(yearUsed) · 峰 @Fmt(cr.PeakCredits)
+                                    </div>
+                                }
+                                @if (cr.TotalActiveDays is { } activeDays)
+                                {
+                                    <div class="muted" style="font-size: 0.7rem;" title="累计活跃 / 当前连续">
+                                        活跃 @activeDays 天 (连 @(cr.CurrentStreakDays ?? 0))
+                                    </div>
+                                }
+                                @* 领取类活动一律显示按钮：可领取时是可点的，已领取时是灰色禁用态（与客户端一致） *@
+                                @foreach (var camp in cr.Campaigns.Where(c => c.IsBenefitClaim))
+                                {
+                                    <div style="margin-top: 0.15rem;">
+                                        @if (camp.IsClaimable)
+                                        {
+                                            <button type="button" class="btn primary"
+                                                    style="font-size: 0.68rem; padding: 0.1rem 0.4rem; white-space: nowrap;"
+                                                    disabled="@(claimingCampaignId == camp.CampaignId)"
+                                                    @onclick="() => ClaimCampaignAsync(acc.Id, camp.CampaignId)"
+                                                    title="@($"活动 {camp.CampaignKey}，领取后 30 天有效")">
+                                                @(claimingCampaignId == camp.CampaignId ? "领取中…" : $"🎁 领 {Fmt(camp.BenefitAmount)} Credits")
+                                            </button>
+                                        }
+                                        else if (camp.IsClaimed)
+                                        {
+                                            <button type="button" class="btn secondary" disabled
+                                                    style="font-size: 0.68rem; padding: 0.1rem 0.4rem; white-space: nowrap; opacity: 0.6; cursor: default;"
+                                                    title="今日已领取，每日 10:00（UTC+8）刷新">
+                                                已领取
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                                @if (!string.IsNullOrEmpty(cr.Error))
+                                {
+                                    <div style="font-size: 0.66rem; color: var(--warn);" title="@cr.Error">部分数据缺失</div>
+                                }
+                            }
+                        </td>
                         <td style="font-size: 0.8rem; color: var(--muted);">
                             @(acc.ExpiresAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "长期有效")
                         </td>
@@ -169,7 +248,7 @@
                         </td>
 
                         <!-- 近期成功率（EMA 平滑，非终身累计——终身累计只增不减，会让早期出错的号被永久压权） -->
-                        <td class="mono" style="font-size: 0.8rem;">
+                        <td class="mono" style="font-size: 0.8rem; white-space: nowrap;">
                             @if (ps is null || ps.SuccessCount + ps.ErrTotal == 0)
                             {
                                 <span class="muted">—</span>
@@ -186,7 +265,7 @@
                         </td>
 
                         <!-- 在途请求数 / 上限 -->
-                        <td class="mono" style="font-size: 0.8rem;">
+                        <td class="mono" style="font-size: 0.8rem; white-space: nowrap;">
                             @if (ps is null)
                             {
                                 <span class="muted">—</span>
@@ -398,6 +477,7 @@
     {
         AuthService.OnAuthStateChanged += HandleAuthChanged;
         ReloadAccounts();
+        _ = LoadCreditsAsync(); // 走网络，后台拉——不阻塞首屏账号列表
     }
 
     public void Dispose()
@@ -411,6 +491,7 @@
     private void HandleAuthChanged()
     {
         ReloadAccounts();
+        _ = LoadCreditsAsync();
         InvokeAsync(StateHasChanged);
     }
 
@@ -424,6 +505,71 @@
 
     private PoolSnapshot snapshot = new();
     private Dictionary<string, PoolAccountStatus> _statusById = new(StringComparer.Ordinal);
+
+    // --- Credits（余额 / 近一年消耗 / 活跃天数 / 每日福利）---
+    private Dictionary<string, QoderCreditsSnapshot> _creditsById = new(StringComparer.Ordinal);
+    private bool creditsLoading;
+
+    private QoderCreditsSnapshot? CreditsOf(string accountId) =>
+        _creditsById.TryGetValue(accountId, out var s) ? s : null;
+
+    private async Task LoadCreditsAsync(bool force = false)
+    {
+        creditsLoading = true;
+        try
+        {
+            var ids = accounts.Select(a => a.Id).ToList();
+            _creditsById = ids.Count == 0
+                ? new Dictionary<string, QoderCreditsSnapshot>(StringComparer.Ordinal)
+                : await CreditsService.GetAllAsync(ids, force);
+        }
+        catch
+        {
+            // Credits 是增强信息：拉不到就不显示，不影响账号列表本身。
+            // 具体是哪个账号的哪个接口失败，由 QoderCreditsService 记日志。
+        }
+        finally
+        {
+            creditsLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>正在领取的活动 id，用于禁用按钮防重复点击。</summary>
+    private string? claimingCampaignId;
+
+    private async Task ClaimCampaignAsync(string accountId, string campaignId)
+    {
+        claimingCampaignId = campaignId;
+        try
+        {
+            var r = await CreditsService.ClaimAsync(accountId, campaignId);
+            if (r.Success && r.Snapshot is not null)
+            {
+                _creditsById[accountId] = r.Snapshot;
+                ShowToast("领取成功，Credits 已到账。");
+            }
+            else
+            {
+                ShowToast($"领取失败：{r.Error ?? "未知原因"}", isError: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowToast($"领取失败：{ex.Message}", isError: true);
+        }
+        finally
+        {
+            claimingCampaignId = null;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Credits 数值展示：整数不带小数，小数最多两位（上游给的是 0.9 / 0.8 这种）。</summary>
+    private static string Fmt(double? v) =>
+        v is not { } d ? "—"
+        : d == Math.Floor(d) ? d.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
+        : d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     private PoolAccountStatus? PoolStatusOf(string accountId) =>
         _statusById.TryGetValue(accountId, out var s) ? s : null;
@@ -624,8 +770,7 @@
                     await InvokeAsync(() =>
                     {
                         CloseAddDialog();
-                        flashMessage = "Qoder OAuth 账号已连接！";
-                        flashIsError = false;
+                        ShowToast("Qoder OAuth 账号已连接！");
                         ReloadAccounts();
                         StateHasChanged();
                     });

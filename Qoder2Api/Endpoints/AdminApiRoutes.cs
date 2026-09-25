@@ -70,13 +70,39 @@ public static class AdminApiRoutes
             }
         });
 
-        app.MapDelete("/api/accounts/{id}", (string id, QoderAuthService auth, QoderPool pool) =>
+        /// 账号 Credits：余额 / 近一年消耗 / 活跃天数 / 每日福利可领取状态。
+        /// force=true 绕过缓存强制刷新。
+        app.MapGet("/api/accounts/{id}/credits", async (string id, bool? force, QoderCreditsService credits, CancellationToken ct) =>
+        {
+            return Results.Ok(await credits.GetAsync(id, force == true, ct));
+        });
+
+        /// 批量取全部账号的 Credits（账号列表页一次拿全），返回 accountId → 快照 的映射。
+        app.MapGet("/api/credits", async (bool? force, QoderAuthService auth, QoderCreditsService credits, CancellationToken ct) =>
+        {
+            var ids = auth.Database.GetAllAccounts().Select(a => a.Id);
+            return Results.Ok(await credits.GetAllAsync(ids, force == true, ct));
+        });
+
+        /// 领取活动福利（「每天领 100 Credits」）。
+        /// 对应官方活动页的 POST /sash/api/v1/me/campaigns/{campaignId}/claim，无请求体。
+        app.MapPost("/api/accounts/{id}/campaigns/{campaignId}/claim",
+            async (string id, string campaignId, QoderCreditsService credits, CancellationToken ct) =>
+            {
+                var r = await credits.ClaimAsync(id, campaignId, ct);
+                return r.Success
+                    ? Results.Ok(new { success = true, credits = r.Snapshot })
+                    : Results.BadRequest(new { success = false, error = r.Error });
+            });
+
+        app.MapDelete("/api/accounts/{id}", (string id, QoderAuthService auth, QoderPool pool, QoderCreditsService credits) =>
         {
             auth.Database.DeleteAccount(id);
             // 一并清理池状态与 Key 绑定：残留的池状态行会被下次同名 id 复用，
             // 而悬空的 Key 绑定会让 UI 显示"（默认活跃账户）"误导用户。
             auth.Database.DeletePoolState(id);
             auth.Database.ClearKeyBindings(id);
+            credits.Forget(id); // Credits 缓存同理，否则同 id 复用会显示上一个账号的数据
             pool.SyncAccounts(auth.Database.GetAllAccounts());
             auth.NotifyChange();
             return Results.Ok(new { success = true });

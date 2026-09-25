@@ -59,8 +59,11 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* 内容区宽度。原来锁死 76rem(1216px)，1080P(1920px) 下两侧各空 352px——
+   而账号表有 10 列，正是最需要宽度的地方。改为随视口放大，
+   保留 110rem 上限避免超宽屏行长失控；96vw 保证窄屏下仍留出边距。 */
 .wrap {
-  max-width: 76rem;
+  max-width: min(110rem, 96vw);
   margin: 0 auto;
   padding: 1.5rem 1.25rem 4rem;
 }
@@ -79,7 +82,7 @@ header.top {
   display: flex;
   align-items: center;
   gap: 2rem;
-  max-width: 76rem;
+  max-width: min(110rem, 96vw); /* 与 .wrap 保持一致，否则顶栏和内容左右错位 */
   height: 60px;
   margin: 0 auto;
   padding: 0 1.25rem;
@@ -277,6 +280,9 @@ input:focus, select:focus, textarea:focus {
 
 table {
   width: 100%;
+  /* 列多时不要压缩列宽——压缩会把「就绪」「● 当前活跃」这类徽章和表头挤成两行。
+     改为按内容撑开，超出容器时交给 .table-wrap 的横向滚动。 */
+  min-width: max-content;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
@@ -286,6 +292,12 @@ th, td {
   padding: 0.7rem 0.85rem;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
+}
+
+/* 表头不换行。中文每个字之间都能断行，max-content 只算一个字宽——
+   表头若能断行，上面的 min-width: max-content 就撑不开表格，列照样被挤窄。 */
+th {
+  white-space: nowrap;
 }
 
 th {
@@ -316,6 +328,7 @@ tbody tr:hover {
   font-weight: 600;
   border: 1px solid var(--line);
   line-height: 1.3;
+  white-space: nowrap; /* 「就绪」「● 当前活跃」必须整块显示，不能被挤断 */
 }
 
 .badge.active {
@@ -336,10 +349,11 @@ tbody tr:hover {
   background: var(--warn-light);
 }
 
+/* word-break 只给 .urlbox：URL 是无空格长串，必须允许任意位置断行。
+   表格单元格里的 .mono（数字、模型 key）不能断——否则「0 / 3」会被拆成两行。 */
 .mono, code, .urlbox {
   font-family: var(--font-mono);
   font-size: 0.84rem;
-  word-break: break-all;
 }
 
 .urlbox {
@@ -350,6 +364,7 @@ tbody tr:hover {
   border-radius: 8px;
   color: var(--ink);
   white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .dl {

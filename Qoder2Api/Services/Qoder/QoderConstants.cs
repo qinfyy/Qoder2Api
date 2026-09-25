@@ -23,6 +23,11 @@ public static class QoderConstants
     public const string ModelListURL = "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1";
     public const string JobTokenExchangeURL = "https://openapi.qoder.sh/api/v1/jobToken/exchange";
     public const string DeviceJobTokenURL = "https://openapi.qoder.sh/api/v1/me/jobToken";
+    /// <summary>
+    /// openapi 基址。Credits / 用量 / 活动等 /sash 接口都挂在这个域下。
+    /// 这些接口只要 Bearer token，不需要 api3.qoder.sh 那套 COSY 签名。
+    /// </summary>
+    public const string OpenApiBaseUrl = "https://openapi.qoder.sh";
     public const string UserStatusURL = "https://openapi.qoder.sh/api/v3/user/status";
     public const string UserInfoURL = "https://openapi.qoder.sh/api/v1/userinfo";
     public const string DeviceLoginURL = "https://qoder.com/device/selectAccounts";

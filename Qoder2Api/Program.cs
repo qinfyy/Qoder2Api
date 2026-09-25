@@ -52,6 +52,7 @@ builder.Services.AddHttpClient(QoderHttp.ClientName, c =>
 builder.Services.AddSingleton<SqliteDbService>();
 builder.Services.AddSingleton<QoderAuthService>();
 builder.Services.AddSingleton<QoderProxyService>();
+builder.Services.AddSingleton<QoderCreditsService>();
 
 builder.Services.Configure<QueueOptions>(builder.Configuration.GetSection(QueueOptions.SectionName));
 builder.Services.AddSingleton<QoderQueueClient>();

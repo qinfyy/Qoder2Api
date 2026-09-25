@@ -95,13 +95,6 @@
                     <span>○ 未启用保护：本机及局域网客户端可免密直接调用（可任意填写 sk-xxx）。</span>
                 }
             </div>
-
-            @if (!string.IsNullOrEmpty(flashMessage))
-            {
-                <div style="font-size: 0.75rem; color: @(flashIsError ? "var(--danger)" : "var(--ok)");">
-                    @flashMessage
-                </div>
-            }
         </section>
     </div>
 
@@ -139,7 +132,7 @@
             </div>
 
             <div style="font-size: 0.85rem; line-height: 1.6;" class="muted">
-                <p style="margin-bottom: 0.5rem;"><strong style="color: var(--ink);">NextChat / Cherry Studio / Cursor：</strong></p>
+                <p style="margin-bottom: 0.5rem;"><strong style="color: var(--ink);">Claude Code / Codex：</strong></p>
                 <ul style="padding-left: 1.25rem; margin: 0;">
                     <li><strong>接口地址 (Base URL)</strong>: <code class="mono">@GetBaseUrl()</code></li>
                     <li><strong>API Key</strong>: 填写任意已启用的 Key（免密模式下填任意字符串如 <code>sk-123</code>）</li>

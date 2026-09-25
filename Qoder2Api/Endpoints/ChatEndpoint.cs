@@ -309,6 +309,11 @@ public static class ChatEndpoint
             }
             catch (Exception ex)
             {
+                // 兜底分支：任何没被上面分流的异常都归为 Transport。
+                // 必须记日志——否则真实原因（比如请求体构造/序列化失败）会被
+                // upstream_unreachable 这个笼统的错误码盖住，排查时只剩一句 ex.Message。
+                log.LogError(ex, "请求上游时发生未预期异常 account={Account} model={Model}",
+                    Short(accountId), request.Model);
                 onError(new QoderUpstreamException(QoderErrorKind.Transport, null, "", ex.Message));
                 if (session is not null)
                 {
