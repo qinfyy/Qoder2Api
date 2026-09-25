@@ -69,11 +69,15 @@
         <div class="metric-label">平均首字延迟</div>
         <div class="metric-value">
             @{
-                var ttft = records.Where(r => r.FirstTokenMs > 0).Select(r => r.FirstTokenMs).ToList();
+                var ttft = records.Where(r => r.FirstTokenMs > 0).Select(r => (double)r.FirstTokenMs).ToList();
+                var ttftStream = records.Count(r => r.FirstTokenMs > 0 && r.IsStream == true);
             }
             @(ttft.Count > 0 ? $"{ttft.Average():F0} ms" : "—")
         </div>
-        <div class="metric-sub">上游 event:finish 的 firstTokenDuration</div>
+        <div class="metric-sub"
+             title="从请求进入到首个内容 token 到达的实测耗时，含排队等待与换号重试。&#10;统计口径：@ttft.Count / @records.Count 条记录有值，其中流式 @ttftStream 条。&#10;非流式请求的客户端要等全部聚合完才收到内容，其值量的是「上游何时开始产出」。">
+            实测 · 含排队 @ttft.Count 条
+        </div>
     </div>
 
     <div class="metric-box">
@@ -110,6 +114,7 @@
                     <th>补全 Tokens</th>
                     <th>思考 Tokens</th>
                     <th>缓存命中</th>
+                    <th>是否流式</th>
                     <th>首字延迟</th>
                     <th>总延迟</th>
                     <th>供应商</th>
@@ -120,7 +125,7 @@
                 @if (records.Count == 0)
                 {
                     <tr>
-                        <td colspan="10" class="muted" style="text-align: center; padding: 2.5rem;">
+                        <td colspan="11" class="muted" style="text-align: center; padding: 2.5rem;">
                             暂无请求记录。使用第三方客户端发起对话后将在此显示。
                         </td>
                     </tr>
@@ -144,7 +149,18 @@
                         <td class="mono">@r.CompletionTokens</td>
                         <td class="mono" style="color: var(--warn);">@(r.ReasoningTokens > 0 ? r.ReasoningTokens.ToString() : "—")</td>
                         <td class="mono" style="color: var(--ok);">@(r.CachedTokens > 0 ? r.CachedTokens.ToString() : "—")</td>
-                        <td class="mono" style="font-size: 0.8rem;">@(r.FirstTokenMs > 0 ? $"{r.FirstTokenMs} ms" : "—")</td>
+                        <td class="mono" style="font-size: 0.8rem;">
+                            @(r.IsStream switch
+                            {
+                                true => "是",
+                                false => "否",
+                                null => "—",
+                            })
+                        </td>
+                        <td class="mono" style="font-size: 0.8rem;"
+                            title="@(r.FirstTokenMs > 0 ? "含排队等待与换号重试" : "本次没有可用的首字延迟：请求在产出内容前就失败或被取消")">
+                            @(r.FirstTokenMs > 0 ? $"{r.FirstTokenMs:N0} ms" : "—")
+                        </td>
                         <td class="mono">@(r.LatencyMs) ms</td>
                         <td class="supplier-cell" title="@SupplierTitle(r.AccountUid)">
                             @SupplierName(r.AccountUid)

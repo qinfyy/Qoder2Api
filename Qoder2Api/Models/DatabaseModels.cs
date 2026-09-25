@@ -76,10 +76,27 @@ public class UsageRecord
     /// </summary>
     public string? UsageSource { get; set; }
 
+    /// <summary>
+    /// 请求是否为流式（下游 <c>stream=true</c>）。
+    ///
+    /// **可空**：本字段加入之前的历史记录是 NULL，显示为「—」——它们既可能是流式
+    /// 也可能不是，不能默认成「否」——那是在编造数据。
+    ///
+    /// 与首字延迟配合看：只有流式请求的 FirstTokenMs 才是下游真实体感的首字延迟，
+    /// 非流式请求的客户端要等全部聚合完才收到内容。
+    /// </summary>
+    public bool? IsStream { get; set; }
+
     /// <summary>本次请求实际使用的账号（多账号轮换下用于归因）。</summary>
     public string? AccountUid { get; set; }
 
-    /// <summary>首 token 耗时（毫秒，来自上游 event:finish 的 firstTokenDuration）。</summary>
+    /// <summary>
+    /// 首字延迟（毫秒）：从请求进入到**首个内容 token 到达**的实测耗时。
+    ///
+    /// **含排队等待与换号重试**——刻意如此：这是下游真实感受到的首字延迟。
+    /// 纯用量帧不计入；请求在产出内容前就失败/被取消时为 0（显示为 —）。
+    /// 上游自报的 firstTokenDuration 只在本地没打上点时兜底。
+    /// </summary>
     public long FirstTokenMs { get; set; }
 
     public long LatencyMs { get; set; }

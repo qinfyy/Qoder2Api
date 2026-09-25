@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -45,13 +46,37 @@ public sealed class QoderStreamSession : IAsyncDisposable
     private readonly CancellationToken _outer;
     private readonly string _accountId;
 
+    private readonly Stopwatch? _requestClock;
+    private bool _firstTokenMarked;
+
     private string? _primedJson;
 
     public QoderUpstreamException? Error { get; private set; }
 
     public UsageCollector Usage { get; }
 
+    /// <summary>
+    /// 首字延迟（毫秒）：从请求进入到**首个内容 token 到达**。
+    /// 含排队等待与选号重试，反映下游真实感受到的首字延迟。
+    /// </summary>
     public long FirstTokenMs { get; private set; }
+
+    /// <summary>
+    /// 首个内容 token 到达时打点，只记一次（换号重试不覆盖）。
+    /// 时钟为 null 时保持 0，由上游自报的 firstTokenDuration 兜底。
+    /// </summary>
+    private void MarkFirstToken()
+    {
+        if (_firstTokenMarked)
+        {
+            return;
+        }
+        _firstTokenMarked = true;
+        if (_requestClock is not null)
+        {
+            FirstTokenMs = _requestClock.ElapsedMilliseconds;
+        }
+    }
 
     public QoderRequestIds Ids { get; }
 
@@ -65,7 +90,8 @@ public sealed class QoderStreamSession : IAsyncDisposable
         string accountId,
         string modelKey,
         QoderRequestIds ids,
-        UsageCollector usage)
+        UsageCollector usage,
+        Stopwatch? requestClock)
     {
         _resp = resp;
         _reader = reader;
@@ -75,6 +101,7 @@ public sealed class QoderStreamSession : IAsyncDisposable
         ModelKey = modelKey;
         Ids = ids;
         Usage = usage;
+        _requestClock = requestClock;
     }
 
     public string AccountId => _accountId;
@@ -103,7 +130,12 @@ public sealed class QoderStreamSession : IAsyncDisposable
                 }
                 if (parsed.Kind == EnvelopeKind.Finish)
                 {
-                    FirstTokenMs = parsed.FirstTokenMs;
+                    // 上游自报的 firstTokenDuration 不含我们的排队等待与选号耗时，
+                    // 只在本地没打上点时兜底（正常路径下本地值更贴近下游体感）。
+                    if (!_firstTokenMarked && parsed.FirstTokenMs > 0)
+                    {
+                        FirstTokenMs = parsed.FirstTokenMs;
+                    }
                     continue;
                 }
                 if (parsed.Kind == EnvelopeKind.Error)
@@ -124,6 +156,7 @@ public sealed class QoderStreamSession : IAsyncDisposable
                 // 有效业务 chunk：缓存下来（**绝不能丢**，否则首帧内容缺失），提交。
                 // 响应里的 model 字段原样透传上游，不改成请求模型。
                 _primedJson = parsed.InnerJson!;
+                MarkFirstToken(); // 首字就在这里到达，先于下游写出的任何字节
                 ObserveUsage(parsed.InnerJson!);
                 return PrimeResult.Committed;
             }
@@ -171,8 +204,12 @@ public sealed class QoderStreamSession : IAsyncDisposable
                     continue;
 
                 case EnvelopeKind.Finish:
-                    FirstTokenMs = parsed.FirstTokenMs;
-                    yield return new StreamEvent(StreamEventKind.Finish, null, parsed.FirstTokenMs);
+                    // 同 PrimeAsync：上游值只兜底，本地打点优先（含排队时间）。
+                    if (!_firstTokenMarked && parsed.FirstTokenMs > 0)
+                    {
+                        FirstTokenMs = parsed.FirstTokenMs;
+                    }
+                    yield return new StreamEvent(StreamEventKind.Finish, null, FirstTokenMs);
                     continue;
 
                 case EnvelopeKind.Error:
@@ -196,6 +233,8 @@ public sealed class QoderStreamSession : IAsyncDisposable
                         yield return new StreamEvent(StreamEventKind.Usage, inner);
                         continue;
                     }
+                    // 只有真正的**内容** chunk 才算首字——纯用量帧不算。
+                    MarkFirstToken();
                     yield return new StreamEvent(StreamEventKind.Chunk, inner);
                     continue;
                 }
@@ -398,10 +437,10 @@ public class QoderProxyService
         CosyCreds creds,
         string accountId,
         QoderRequestIds? ids = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Stopwatch? requestClock = null)
     {
-        var modelDef = QoderConstants.ResolveModel(request.Model)
-            ?? throw new QoderUpstreamException(
+        var modelDef = QoderConstants.ResolveModel(request.Model) ?? throw new QoderUpstreamException(
                 QoderErrorKind.ModelNotFound, StatusCodes.Status404NotFound, request.Model ?? "",
                 $"模型 {request.Model} 不存在（请在 models.xml 中登记）。");
         var requestIds = ids ?? QoderRequestIds.New();
@@ -480,7 +519,7 @@ public class QoderProxyService
 
         var usage = new UsageCollector(promptEstimate);
         return new QoderStreamSession(resp, reader, linked, ct, accountId,
-            modelDef.Key, requestIds, usage);
+            modelDef.Key, requestIds, usage, requestClock);
     }
 
     public async IAsyncEnumerable<string> StreamChatAsync(
@@ -489,7 +528,7 @@ public class QoderProxyService
     {
         var creds = await _auth.GetValidCosyCredsAsync(ct);
         var acc = _auth.ActiveAccount;
-        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct);
+        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct, Stopwatch.StartNew());
 
         var prime = await session.PrimeAsync(ct);
         if (prime != PrimeResult.Committed)
@@ -516,7 +555,7 @@ public class QoderProxyService
         var creds = await _auth.GetValidCosyCredsAsync(ct);
         var acc = _auth.ActiveAccount;
 
-        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct);
+        await using var session = await OpenAsync(request, creds, acc?.Id ?? "", null, ct, Stopwatch.StartNew());
         var prime = await session.PrimeAsync(ct);
         if (prime != PrimeResult.Committed)
         {

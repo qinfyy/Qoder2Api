@@ -50,6 +50,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 HttpStatus = StatusCodes.Status401Unauthorized,
                 Status = "error",
                 ErrorMessage = "API Key 校验失败或未授权",
@@ -65,6 +66,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 HttpStatus = StatusCodes.Status404NotFound,
                 Status = "error",
                 ErrorMessage = "模型不存在",
@@ -78,6 +80,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 HttpStatus = StatusCodes.Status503ServiceUnavailable,
                 Status = "error",
                 ErrorMessage = "池内无可用账号",
@@ -138,7 +141,8 @@ public static class ChatEndpoint
             var outcome = await ServeOnAccountAsync(
                 request, proxy, queue, qOpts, pool, held.AccountId, creds, log, queueObserver, ct,
                 s => session = s,
-                e => lastError = e);
+                e => lastError = e,
+                sw);
 
             if (outcome == AttemptOutcome.Committed)
             {
@@ -166,6 +170,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 LatencyMs = sw.ElapsedMilliseconds,
                 HttpStatus = lastError is null ? StatusCodes.Status503ServiceUnavailable : 502,
                 Status = "error",
@@ -199,7 +204,8 @@ public static class ChatEndpoint
         IQueueWaitObserver? queueObserver,
         CancellationToken ct,
         Action<QoderStreamSession> onCommitted,
-        Action<QoderUpstreamException> onError)
+        Action<QoderUpstreamException> onError,
+        Stopwatch? requestClock = null)
     {
         QoderRequestIds? ids = null;
         int queueRecoveries = 0;
@@ -215,7 +221,8 @@ public static class ChatEndpoint
             QoderStreamSession? session = null;
             try
             {
-                session = await proxy.OpenAsync(request, creds, accountId, ids, ct);
+                // 把请求级计时器交给会话：首字延迟以「请求进入」为起点，因此含排队等待。
+                session = await proxy.OpenAsync(request, creds, accountId, ids, ct, requestClock);
                 var prime = await session.PrimeAsync(ct);
 
                 if (prime == PrimeResult.Committed)
@@ -423,6 +430,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 PromptTokens = usage.PromptTokens ?? 0,
                 CompletionTokens = usage.CompletionTokens ?? 0,
                 TotalTokens = usage.TotalTokens ?? 0,
@@ -446,6 +454,7 @@ public static class ChatEndpoint
             db.LogUsage(new UsageRecord
             {
                 Model = request.Model,
+                IsStream = request.Stream == true,
                 LatencyMs = sw.ElapsedMilliseconds,
                 HttpStatus = 502,
                 Status = "error",
@@ -654,6 +663,7 @@ public static class ChatEndpoint
         db.LogUsage(new UsageRecord
         {
             Model = request.Model,
+            IsStream = request.Stream == true,
             PromptTokens = built.PromptTokens ?? 0,
             CompletionTokens = built.CompletionTokens ?? 0,
             TotalTokens = built.TotalTokens ?? 0,
