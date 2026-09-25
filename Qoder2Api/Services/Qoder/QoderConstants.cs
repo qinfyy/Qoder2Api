@@ -46,6 +46,15 @@ public static class QoderConstants
     /// </summary>
     public const string OfficialClientId = "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa";
 
+    /// <summary>
+    /// 取不到套餐类型时的占位值。
+    ///
+    /// **不要写死 "Pro"**——那是凭空断言用户是 Pro 会员。拿不到就说拿不到，
+    /// 让「未知」和「确实是 Pro」在界面上可区分。上游偶尔返回空串或 null，
+    /// 那和「没有这个字段」是一回事，都归到这里。
+    /// </summary>
+    public const string UnknownPlan = "Unknown";
+
     public class QoderModelDefinition
     {
         [JsonPropertyName("key")]
@@ -223,16 +232,6 @@ public static class QoderConstants
         return list;
     }
 
-    /// <summary>
-    /// 把上游模型目录合并进 models.xml。两种调用方行为不同：
-    ///
-    /// - <b>后台定时同步</b>（allowAdd = false）：只刷新已有模型的倍率 / 是否免费 / 错峰折扣。
-    ///   模型集合、以及人工维护的 displayName / 描述 / 别名一律不动——自动流程不该
-    ///   悄悄改动这个文件的内容。
-    /// - <b>管理员手动同步</b>（allowAdd = true）：上游有、XML 里没有的模型一并新增，
-    ///   用于首次生成 models.xml，或补上上游新上的模型。描述上游不提供，留空由人工补。
-    /// </summary>
-    /// <returns>新增与更新的模型数。</returns>
     public static CatalogMergeResult MergeUpstreamCatalog(
         IReadOnlyList<ModelCatalogEntry> upstream, bool allowAdd = false, ILogger? log = null)
     {

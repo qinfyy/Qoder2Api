@@ -336,8 +336,6 @@ public sealed class QoderCreditsService
         req.Headers.TryAddWithoutValidation("User-Agent", "Qoder");
     }
 
-    // ---------------------------------------------------------------- 解析 ----
-
     private static void ParseUsage(JsonDocument? doc, QoderCreditsSnapshot snap, List<string> failures)
     {
         if (doc is null) { failures.Add("usage"); return; }

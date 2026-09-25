@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Qoder2Api.Services.Qoder; // QoderConstants.UnknownPlan
 
 namespace Qoder2Api.Models;
 
@@ -18,7 +19,7 @@ public class AccountRecord
     /// 改显示这个字段。国际版账号多为 null。
     /// </summary>
     public string? UserPhone { get; set; }
-    public string PlanName { get; set; } = "Pro";
+    public string PlanName { get; set; } = QoderConstants.UnknownPlan;
     public string AuthMethod { get; set; } = "device"; // device, pat
 
     /// <summary>

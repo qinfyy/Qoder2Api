@@ -163,7 +163,7 @@ public class QoderAuthService
         catch { }
 
         // Fetch User Status (plan, quota)
-        string plan = "Pro";
+        string plan = QoderConstants.UnknownPlan;
         double quota = 0;
         bool exceeded = false;
         try
@@ -175,7 +175,7 @@ public class QoderAuthService
             {
                 var sdoc = JsonDocument.Parse(await sresp.Content.ReadAsStringAsync(ct));
                 var sroot = sdoc.RootElement;
-                plan = sroot.TryGetProperty("plan", out var pp) ? pp.GetString() ?? "Pro" : "Pro";
+                plan = sroot.TryGetProperty("plan", out var pp) ? NonEmpty(pp.GetString()) : QoderConstants.UnknownPlan;
                 quota = sroot.TryGetProperty("quota", out var qp) ? qp.GetDouble() : 0;
                 exceeded = sroot.TryGetProperty("isQuotaExceeded", out var exp2) && exp2.GetBoolean();
             }
@@ -255,7 +255,7 @@ public class QoderAuthService
         string uid = sroot.GetProperty("id").GetString()!;
         string name = sroot.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
         string email = sroot.TryGetProperty("email", out var ep) ? ep.GetString() ?? "" : "";
-        string plan = sroot.TryGetProperty("plan", out var pp) ? pp.GetString() ?? "Pro" : "Pro";
+        string plan = sroot.TryGetProperty("plan", out var pp) ? NonEmpty(pp.GetString()) : QoderConstants.UnknownPlan;
         double quota = sroot.TryGetProperty("quota", out var qp) ? qp.GetDouble() : 0;
         bool exceeded = sroot.TryGetProperty("isQuotaExceeded", out var exp2) && exp2.GetBoolean();
 
@@ -341,6 +341,13 @@ public class QoderAuthService
         }
         return null;
     }
+
+    /// <summary>
+    /// 空串 / 空白一律换成"取不到"时的占位值。上游偶尔返回 <c>""</c> 或 null，
+    /// 那和"没有这个字段"是一回事——都不能当成 Pro。
+    /// </summary>
+    private static string NonEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? QoderConstants.UnknownPlan : value;
 
     private static (string jobToken, DateTimeOffset expiresAt) ParseJobTokenResponse(string body)
     {

@@ -4,16 +4,6 @@ using Qoder2Api.Configuration;
 
 namespace Qoder2Api.Services.Qoder;
 
-/// <summary>
-/// 从上游同步模型目录，写回 models.xml。
-///
-/// 两条路径，行为不同：
-/// - <see cref="TryRefreshAsync"/> 后台定时（周期默认 **2 分钟**，与官方客户端一致，
-///   客户端常量 eec = 12e4）：只刷新已有模型的倍率 / 折扣，**不新增模型**。
-/// - <see cref="SyncManualAsync"/> 管理员手动：缺失的模型一并新增，用于首次生成 models.xml。
-///
-/// 周期设为 0 可关闭后台同步（此时只能靠手动）。
-/// </summary>
 public sealed class ModelCatalogRefresher : BackgroundService
 {
     private readonly QoderModelCatalog _catalog;
@@ -61,24 +51,12 @@ public sealed class ModelCatalogRefresher : BackgroundService
         }
     }
 
-    /// <summary>
-    /// 后台定时同步：只刷新已有模型的倍率 / 折扣，不新增模型。
-    /// 失败只记日志——目录是增强信息，失败不影响代理主流程。
-    /// </summary>
     public async Task<bool> TryRefreshAsync(CancellationToken ct = default)
-        => (await SyncAsync(allowAdd: false, ct)).Success;
+        => (await SyncAsync(allowAdd: true, ct)).Success;
 
-    /// <summary>
-    /// 管理员手动同步：上游有、models.xml 里没有的模型一并新增，
-    /// 用于首次生成 models.xml 或补上上游新上的模型。
-    /// </summary>
     public Task<CatalogSyncOutcome> SyncManualAsync(CancellationToken ct = default)
         => SyncAsync(allowAdd: true, ct);
 
-    /// <summary>
-    /// 拉一次上游目录并合并。
-    /// 用池里的活跃账号（目录是账号无关的，任意一个有效账号即可）。
-    /// </summary>
     private async Task<CatalogSyncOutcome> SyncAsync(bool allowAdd, CancellationToken ct)
     {
         try

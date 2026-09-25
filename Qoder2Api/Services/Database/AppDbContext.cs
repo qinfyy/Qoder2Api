@@ -153,7 +153,7 @@ public class AppDbContext : DbContext
                             UserId = uid,
                             UserName = name ?? "Qoder User",
                             UserEmail = email ?? "",
-                            PlanName = plan ?? "Pro",
+                            PlanName = string.IsNullOrWhiteSpace(plan) ? QoderConstants.UnknownPlan : plan,
                             AuthMethod = method ?? "device",
                             JobToken = jt,
                             DeviceToken = dt,

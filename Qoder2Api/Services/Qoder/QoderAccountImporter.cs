@@ -85,8 +85,6 @@ public static class QoderAccountImporter
             UpdatedAt = DateTime.UtcNow,
         };
 
-        // expireTime 是 unix 毫秒。**注意它被序列化成字符串**（"1792843994000"）而不是
-        // 数字——只按 Number 解析会静默拿到 null，过期判断就全废了。两种都吃。
         if (hasInfo && LongOf(info, "expireTime") is long ms && ms > 0)
         {
             acc.ExpiresAt = DateTimeOffset.FromUnixTimeMilliseconds(ms);
@@ -107,13 +105,12 @@ public static class QoderAccountImporter
 
     private static string PlanOf(JsonElement item, JsonElement info)
     {
-        // plan_type 形如 "Pro Trial"，userTag 同源；都没有就退回 Pro。
         string? p = Str(item, "plan_type");
         if (string.IsNullOrWhiteSpace(p) && info.ValueKind == JsonValueKind.Object)
         {
             p = Str(info, "userTag");
         }
-        return string.IsNullOrWhiteSpace(p) ? "Pro" : p;
+        return string.IsNullOrWhiteSpace(p) ? QoderConstants.UnknownPlan : p;
     }
 
     private static string? Str(JsonElement el, string name) =>
