@@ -4,6 +4,7 @@
 @using Qoder2Api.Components.Layout
 @using Qoder2Api.Models
 @using Qoder2Api.Services.Qoder
+@using Microsoft.AspNetCore.Components.Forms
 @inject QoderAuthService AuthService
 @inject QoderPool Pool
 @inject QoderCreditsService CreditsService
@@ -131,8 +132,9 @@
                             <div class="muted" style="font-size: 0.78rem;" title="@sub.Title">@sub.Text</div>
                         </td>
                         <td>
-                            <span class="badge" style="background: var(--bg); font-size: 0.72rem;">
-                                @(acc.AuthMethod == "pat" ? "PAT" : "OAuth")
+                            <span class="badge" style="background: var(--bg); font-size: 0.72rem;"
+                                  title="@AuthMethodTitle(acc)">
+                                @AuthMethodLabel(acc)
                             </span>
                             <span class="badge" style="background: var(--bg); font-size: 0.72rem;"
                                   title="@RegionTitle(acc)">
@@ -377,6 +379,14 @@
                                 <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">填入从 qoder.com/account/integrations 复制的 pt-* 长期令牌。</div>
                             </div>
                         </button>
+
+                        <button type="button" class="btn" style="display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem; text-align: left; height: auto;" @onclick='() => SetWizardStep("import")'>
+                            <span style="font-size: 1.5rem; line-height: 1;">⬇</span>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: var(--ink); margin-bottom: 0.2rem;">导入账号文件</div>
+                                <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">导入 cockpit-tools 导出的 <span class="mono">qoder_accounts_*.json</span>，凭证直给、无需再登录。</div>
+                            </div>
+                        </button>
                     </div>
                 }
                 else if (wizardStep == "oauth")
@@ -465,6 +475,62 @@
                         </button>
                     </div>
                 }
+                else if (wizardStep == "import")
+                {
+                    <div class="stack">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;" @onclick='() => SetWizardStep("select")'>← 返回方式选择</button>
+                            <span class="badge" style="background: var(--bg);">导入账号文件</span>
+                        </div>
+
+                        <p class="muted" style="font-size: 0.85rem; margin: 0;">
+                            选择 cockpit-tools 导出的 <span class="mono">qoder_accounts_*.json</span>。
+                            文件里的凭证会被直接写入本地数据库，<b>不会</b>再与官方服务交互验证。
+                        </p>
+
+                        <div class="form-field">
+                            <div class="form-field-label"><span>选择文件</span></div>
+                            <InputFile OnChange="OnImportFileSelected" accept=".json,application/json" />
+                        </div>
+
+                        @if (importFileName is not null)
+                        {
+                            <div class="muted" style="font-size: 0.8rem;">已选择：<span class="mono">@importFileName</span></div>
+                        }
+
+                        @if (!string.IsNullOrEmpty(importError))
+                        {
+                            <div class="alert-box err">
+                                <span>❌ @importError</span>
+                            </div>
+                        }
+
+                        @if (importResult is not null)
+                        {
+                            <div class="alert-box ok">
+                                <span>✅ 共 @importResult.Total 条 —— 新增 @importResult.Added、更新 @importResult.Updated、跳过 @importResult.Skipped</span>
+                            </div>
+                            <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.8rem; color: var(--muted); max-height: 160px; overflow-y: auto;">
+                                @foreach (var e in importResult.Entries)
+                                {
+                                    <li>
+                                        <span class="mono">@e.UserName</span> —— @e.Outcome
+                                        @if (!string.IsNullOrEmpty(e.Detail))
+                                        {
+                                            <span class="muted">（@e.Detail）</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                        <button type="button" class="primary" style="padding: 0.6rem;"
+                                disabled="@(string.IsNullOrEmpty(importJson) || isImporting)"
+                                @onclick="RunImport">
+                            @(isImporting ? "正在导入…" : "开始导入")
+                        </button>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -486,6 +552,78 @@
     private string SelectedRegionSite => QoderEndpoints.For(selectedRegion).WebBase.Replace("https://", "");
 
     private string SelectedRegionPatUrl => $"{QoderEndpoints.For(selectedRegion).WebBase}/account/integrations";
+
+    // 导入（cockpit-tools 导出文件）。区域复用向导第一步选的 selectedRegion，
+    // 不再单开一个选择器——同一个弹窗里选两遍区域只会让人怀疑它们不是一回事。
+    private const long MaxImportBytes = 16 * 1024 * 1024; // 账号文件很小，16MB 足够且防手滑拖进巨型文件
+    private string? importJson;
+    private string? importFileName;
+    private string? importError;
+    private bool isImporting;
+    private QoderAccountImporter.ImportResult? importResult;
+
+    private void ResetImportState()
+    {
+        importJson = null;
+        importFileName = null;
+        importError = null;
+        isImporting = false;
+        importResult = null;
+    }
+
+    private async Task OnImportFileSelected(InputFileChangeEventArgs e)
+    {
+        importError = null;
+        importResult = null;
+        try
+        {
+            using var stream = e.File.OpenReadStream(MaxImportBytes);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+            importJson = await reader.ReadToEndAsync();
+            importFileName = e.File.Name;
+        }
+        catch (Exception ex)
+        {
+            importJson = null;
+            importFileName = null;
+            importError = $"读取文件失败：{ex.Message}";
+        }
+    }
+
+    private void RunImport()
+    {
+        if (string.IsNullOrWhiteSpace(importJson))
+        {
+            return;
+        }
+        isImporting = true;
+        importError = null;
+        importResult = null;
+        try
+        {
+            // 进程内直接调服务，与 PAT 流程一致——面板不需要绕一圈 HTTP。
+            // 区域取向导第一步的 selectedRegion。
+            importResult = AuthService.ImportFromCockpitJson(importJson, selectedRegion);
+            ReloadAccounts();
+            ShowToast($"导入完成：新增 {importResult.Added}、更新 {importResult.Updated}、跳过 {importResult.Skipped}");
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            importError = "JSON 解析失败：" + ex.Message;
+        }
+        catch (FormatException ex)
+        {
+            importError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            importError = ex.Message;
+        }
+        finally
+        {
+            isImporting = false;
+        }
+    }
 
     // OAuth
     private string oauthStatus = "idle"; // idle, waiting, done, error
@@ -617,6 +755,21 @@
         }
         return ("—", "无邮箱");
     }
+
+    /// <summary>认证方式徽标。import = 从 cockpit-tools 导出的文件导入（直给 jobToken）。</summary>
+    private static string AuthMethodLabel(AccountRecord acc) => acc.AuthMethod switch
+    {
+        "pat" => "PAT",
+        "import" => "导入",
+        _ => "OAuth",
+    };
+
+    private static string AuthMethodTitle(AccountRecord acc) => acc.AuthMethod switch
+    {
+        "pat" => "个人访问令牌登录",
+        "import" => "从 cockpit-tools 导出的文件导入，凭证直给、无自动续期",
+        _ => "浏览器 OAuth 设备流登录",
+    };
 
     /// <summary>账号区域徽标。老账号没有该字段，按国际版显示。</summary>
     private static string RegionLabel(AccountRecord acc) =>
@@ -750,6 +903,7 @@
         patInput = "";
         patError = null;
         oauthError = null;
+        ResetImportState();
     }
 
     private void CloseAddDialog()
@@ -765,6 +919,7 @@
         patInput = "";
         patError = null;
         oauthError = null;
+        ResetImportState();
     }
 
     private async Task StartOAuthAsync()

@@ -184,6 +184,47 @@ public static class AdminApiRoutes
             }
         });
 
+        // --- 导入 cockpit-tools 导出的账号 JSON ---
+        // 凭证直给（jobToken 在 auth_user_info_raw.token），不走 /jobToken/exchange。
+        // region 必须显式传：导出文件里没有区域字段，而凭证是分区域的，猜错会 401。
+        app.MapPost("/api/accounts/import", (ImportAccountsRequest req, QoderAuthService auth) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Json))
+            {
+                return Results.BadRequest(new { error = "导入内容不能为空" });
+            }
+
+            QoderAccountImporter.ImportResult res;
+            try
+            {
+                res = auth.ImportFromCockpitJson(req.Json, QoderEndpoints.ParseRegion(req.Region));
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                return Results.BadRequest(new { error = "JSON 解析失败：" + ex.Message });
+            }
+            catch (FormatException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+
+            return Results.Ok(new
+            {
+                success = true,
+                res.Added,
+                res.Updated,
+                res.Skipped,
+                res.Total,
+                entries = res.Entries.Select(e => new
+                {
+                    e.UserId,
+                    e.UserName,
+                    e.Outcome,
+                    e.Detail,
+                }),
+            });
+        });
+
         // --- Proxy API Keys ---
         app.MapGet("/api/keys", (QoderAuthService auth) =>
         {
@@ -239,6 +280,12 @@ public static class AdminApiRoutes
 
     /// <param name="Region">"global"（国际版，默认）/ "cn"（国内版）。PAT 是分区域的。</param>
     public record ConnectPatRequest(string Token, string? Region = null);
+
+    /// <summary>
+    /// 导入 cockpit-tools 导出的账号文件内容（由前端读文件后原样 POST 上来，
+    /// 不经过服务端文件系统——面板不该有任意文件读权限）。
+    /// </summary>
+    public record ImportAccountsRequest(string Json, string? Region = null);
     public record CreateKeyRequest(string Name, string? AccountId = null, string? CustomKey = null);
     public record UpdateSettingsRequest(bool RequireApiKey);
 }

@@ -3,7 +3,7 @@
 把 Qoder 的后端接口包装成 **OpenAI 兼容 API** 的本地代理服务。
 
 自带多账号号池调度、上游模型排队处理、Credits 查询，以及一个 Web 管理面板。
-任何支持 OpenAI 协议的客户端（Claude Code、Codex…）填上地址即可使用。
+任何支持 OpenAI 协议的客户端（Claude Code、Codex 等）填上地址即可使用。
 
 ---
 
@@ -33,7 +33,7 @@
 - 每日福利一键领取
 **管理面板**（Blazor Server）
 - 账户管理、API Key、用量记录、系统设置
-- OAuth 设备码 / PAT 两种方式添加账号，支持多账号切换与解冻
+- OAuth 设备码 / PAT / Cockpit Tools 三种方式添加账号，支持多账号切换与解冻
 
 ---
 

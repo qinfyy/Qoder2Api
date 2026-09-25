@@ -40,7 +40,7 @@ public static class ChatEndpoint
         ILoggerFactory logFactory,
         CancellationToken ct)
     {
-        var log = logFactory.CreateLogger("reg.Endpoints.ChatEndpoint");
+        var log = logFactory.CreateLogger(nameof(ChatEndpoint));
         var sw = Stopwatch.StartNew();
         var db = auth.Database;
 

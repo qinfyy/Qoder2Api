@@ -366,6 +366,65 @@ public class QoderAuthService
         return (token, DateTimeOffset.UtcNow.AddMilliseconds(expiresInMs));
     }
 
+    /// <summary>
+    /// 导入 **cockpit-tools** 导出的账号 JSON（见 <see cref="QoderAccountImporter"/>）。
+    ///
+    /// 去重按 <c>UserId</c> 而非 cockpit 的 <c>id</c>——后者是那套工具自己的主键，
+    /// 与本项目无关。命中已有账号时**只刷新凭证与资料**，保留 Id / 创建时间 /
+    /// 首选标记 / 启停状态，避免一次导入把用户的手工设置冲掉。
+    /// </summary>
+    public QoderAccountImporter.ImportResult ImportFromCockpitJson(string json, QoderRegion region)
+    {
+        var parsed = QoderAccountImporter.Parse(json, region);
+        var entries = new List<QoderAccountImporter.EntryResult>();
+        int added = 0, updated = 0, skipped = 0;
+
+        foreach (var acc in parsed)
+        {
+            if (string.IsNullOrWhiteSpace(acc.UserId))
+            {
+                skipped++;
+                entries.Add(new("", acc.UserName, "跳过", "缺少 user_id，无法去重"));
+                continue;
+            }
+
+            var existing = _db.GetAllAccounts().FirstOrDefault(a =>
+                string.Equals(a.UserId, acc.UserId, StringComparison.OrdinalIgnoreCase));
+
+            if (existing is not null)
+            {
+                existing.UserName = acc.UserName;
+                existing.UserEmail = acc.UserEmail;
+                existing.UserPhone = acc.UserPhone;
+                existing.PlanName = acc.PlanName;
+                existing.JobToken = acc.JobToken;
+                existing.RefreshToken = acc.RefreshToken;
+                existing.ExpiresAt = acc.ExpiresAt;
+                existing.Quota = acc.Quota;
+                existing.IsQuotaExceeded = acc.IsQuotaExceeded;
+                existing.Region = acc.Region;
+                existing.UpdatedAt = DateTime.UtcNow;
+                _db.UpsertAccount(existing);
+                updated++;
+                entries.Add(new(acc.UserId, acc.UserName, "更新", "已刷新该账号的凭证"));
+            }
+            else
+            {
+                acc.IsDefault = !_db.GetAllAccounts().Any(a => a.IsDefault);
+                _db.UpsertAccount(acc);
+                if (acc.IsDefault)
+                {
+                    _db.SetDefaultAccount(acc.Id);
+                }
+                added++;
+                entries.Add(new(acc.UserId, acc.UserName, "新增", acc.Region));
+            }
+        }
+
+        NotifyChange();
+        return new QoderAccountImporter.ImportResult(added, updated, skipped, entries);
+    }
+
     public async Task<CosyCreds> GetCredsForAccountAsync(AccountRecord acc, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(acc.UserId) || string.IsNullOrEmpty(acc.JobToken))
