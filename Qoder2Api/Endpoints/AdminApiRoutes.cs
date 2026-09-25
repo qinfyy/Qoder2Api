@@ -130,25 +130,29 @@ public static class AdminApiRoutes
         });
 
         // --- OAuth PKCE Device Flow ---
-        app.MapPost("/api/oauth/start", (QoderAuthService auth) =>
+        // region 可选："global"（国际版，默认）/ "cn"（国内版）。
+        // 只影响登录页域名（qoder.com / qoder.cn），授权换出来的凭证本身是分区域的。
+        app.MapPost("/api/oauth/start", (QoderAuthService auth, string? region) =>
         {
-            var state = auth.InitiateDeviceFlow();
+            var state = auth.InitiateDeviceFlow(QoderEndpoints.ParseRegion(region));
             return Results.Ok(new
             {
                 verificationUrl = state.VerificationUrl,
                 nonce = state.Nonce,
                 verifier = state.Verifier,
-                machineId = state.MachineId
+                machineId = state.MachineId,
+                region = QoderEndpoints.ToStorageValue(state.Region)
             });
         });
 
-        app.MapGet("/api/oauth/poll", async (string nonce, string verifier, string machineId, QoderAuthService auth, CancellationToken ct) =>
+        app.MapGet("/api/oauth/poll", async (string nonce, string verifier, string machineId, string? region, QoderAuthService auth, CancellationToken ct) =>
         {
             var state = new DeviceFlowState
             {
                 Nonce = nonce,
                 Verifier = verifier,
-                MachineId = machineId
+                MachineId = machineId,
+                Region = QoderEndpoints.ParseRegion(region)
             };
             try
             {
@@ -171,7 +175,7 @@ public static class AdminApiRoutes
             try
             {
                 // targetAccountId = null：面板新增账号，不是续期。
-                await auth.ConnectPatAsync(req.Token, null, ct);
+                await auth.ConnectPatAsync(req.Token, QoderEndpoints.ParseRegion(req.Region), null, ct);
                 return Results.Ok(new { success = true });
             }
             catch (Exception ex)
@@ -233,7 +237,8 @@ public static class AdminApiRoutes
         });
     }
 
-    public record ConnectPatRequest(string Token);
+    /// <param name="Region">"global"（国际版，默认）/ "cn"（国内版）。PAT 是分区域的。</param>
+    public record ConnectPatRequest(string Token, string? Region = null);
     public record CreateKeyRequest(string Name, string? AccountId = null, string? CustomKey = null);
     public record UpdateSettingsRequest(bool RequireApiKey);
 }

@@ -10,7 +10,7 @@
     <isFree>true</isFree>
     <promotionLabel>错峰 4 折</promotionLabel>
     <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="qfmodel">
     <displayName>Qwen3.8-Flash</displayName>
@@ -20,7 +20,7 @@
     <maxInputTokens>180000</maxInputTokens>
     <priceFactor>0</priceFactor>
     <isFree>true</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="qmodel_latest">
     <displayName>Qwen3.7-Max</displayName>
@@ -31,7 +31,7 @@
     <priceFactor>0.1</priceFactor>
     <promotionLabel>错峰2折</promotionLabel>
     <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="qmodel">
     <displayName>Qwen3.7-Plus</displayName>
@@ -42,7 +42,7 @@
     <priceFactor>0.1</priceFactor>
     <promotionLabel>错峰4折</promotionLabel>
     <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="dmodel">
     <displayName>DeepSeek-V4-Pro</displayName>
@@ -52,7 +52,7 @@
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.5</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="dfmodel">
     <displayName>DeepSeek-V4-Flash</displayName>
@@ -62,7 +62,7 @@
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.1</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="kmodel_latest">
     <displayName>Kimi-K3</displayName>
@@ -72,7 +72,7 @@
     <maxInputTokens>200000</maxInputTokens>
     <priceFactor>1.4</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="kmodel">
     <displayName>Kimi-K2.7-Code</displayName>
@@ -82,7 +82,7 @@
     <maxInputTokens>200000</maxInputTokens>
     <priceFactor>0.8</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="gmodel">
     <displayName>GLM-5.3</displayName>
@@ -92,7 +92,7 @@
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.8</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="gfmodel">
     <displayName>GLM-5.3-Flash</displayName>
@@ -101,7 +101,7 @@
     <isVl>true</isVl>
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.1</priceFactor>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="mmodel">
     <displayName>MiniMax-M3</displayName>
@@ -111,7 +111,7 @@
     <maxInputTokens>1000000</maxInputTokens>
     <priceFactor>0.2</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="cmodel">
     <displayName>Cantus</displayName>
@@ -127,7 +127,7 @@
     <isVl>true</isVl>
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.5</priceFactor>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="ultimate">
     <displayName>ultimate</displayName>
@@ -137,7 +137,7 @@
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>2</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="performance">
     <displayName>performance</displayName>
@@ -146,7 +146,7 @@
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>1.1</priceFactor>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="efficient">
     <displayName>efficient</displayName>
@@ -155,7 +155,7 @@
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
     <priceFactor>0.3</priceFactor>
-    <syncedAtMs>1790349647270</syncedAtMs>
+    <syncedAtMs>1790354726795</syncedAtMs>
   </model>
   <model key="lite">
     <displayName>lite</displayName>

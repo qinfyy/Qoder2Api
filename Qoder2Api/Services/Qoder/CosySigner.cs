@@ -9,8 +9,13 @@ public record CosyCreds(
     string AuthToken,
     string? Name = null,
     string? Email = null,
-    string? MachineID = null
-);
+    string? MachineID = null,
+    QoderRegion Region = QoderRegion.Global
+)
+{
+    /// <summary>本凭证所属区域的端点档案。聊天 / 模型目录 / 排队三处都从这里取 URL。</summary>
+    public QoderEndpoints Endpoints { get; } = QoderEndpoints.For(Region);
+}
 
 public static class CosySigner
 {

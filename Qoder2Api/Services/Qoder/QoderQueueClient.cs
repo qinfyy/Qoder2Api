@@ -190,7 +190,7 @@ public sealed class QoderQueueClient
         string requestSetId, string modelKey, string? queueType,
         CosyCreds creds, TimeSpan timeout, CancellationToken ct)
     {
-        var url = BuildQueueStatusUrl(requestSetId, modelKey, queueType);
+        var url = BuildQueueStatusUrl(creds.Endpoints, requestSetId, modelKey, queueType);
 
         // GET 无请求体：COSY 签名对空 body 同样成立（签名串里的 body 段为空）。
         var headers = CosySigner.BuildCosyHeaders([], url, creds);
@@ -247,14 +247,14 @@ public sealed class QoderQueueClient
         }
     }
 
-    public static string BuildQueueStatusUrl(string requestSetId, string modelKey, string? queueType)
+    public static string BuildQueueStatusUrl(QoderEndpoints endpoints, string requestSetId, string modelKey, string? queueType)
     {
         var query = $"requestSetId={Uri.EscapeDataString(requestSetId)}&modelKey={Uri.EscapeDataString(modelKey)}";
         if (!string.IsNullOrWhiteSpace(queueType))
         {
             query += $"&queueType={Uri.EscapeDataString(queueType)}";
         }
-        return $"{QoderConstants.QueueStatusURL}?{query}";
+        return $"{endpoints.QueueStatusUrl}?{query}";
     }
 
     private static TimeSpan ResolveInterval(QoderQueueContext? ctx, QueueOptions opt)

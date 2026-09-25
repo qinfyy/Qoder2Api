@@ -117,7 +117,8 @@ public sealed class QoderModelCatalog
     /// </summary>
     public async Task<ModelCatalogSnapshot> RefreshAsync(CosyCreds creds, CancellationToken ct = default)
     {
-        string url = QoderConstants.ModelListURL;
+        // 模型目录按账号区域取（国际版 api3.qoder.sh / 国内版 gateway.qoder.com.cn）。
+        string url = creds.Endpoints.ModelListUrl;
         try
         {
             var headers = CosySigner.BuildCosyHeaders([], url, creds);

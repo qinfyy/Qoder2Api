@@ -208,7 +208,8 @@ public sealed class QoderCreditsService
         {
             var http = _httpFactory.CreateClient(QoderHttp.ClientName);
             string path = $"/sash/api/v1/me/campaigns/{Uri.EscapeDataString(campaignId)}/claim";
-            using var req = new HttpRequestMessage(HttpMethod.Post, QoderConstants.OpenApiBaseUrl + path);
+            // openapi 域按账号区域取（国际版 openapi.qoder.sh / 国内版 openapi.qoder.com.cn）。
+            using var req = new HttpRequestMessage(HttpMethod.Post, QoderEndpoints.ForRaw(acc.Region).OpenApiUrl(path));
             ApplyAuthHeaders(req, token);
             // 不设 Content-Type：这个接口没有请求体（活动页也是裸 POST + keepalive）。
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -255,10 +256,11 @@ public sealed class QoderCreditsService
             }
 
             // 四个接口互不依赖，并发拉；任一失败只记在自己的字段上（客户端也是 allSettled 语义）。
-            var usage = TryGetJsonAsync("/sash/api/v2/me/usage", token, ct);
-            var summary = TryGetJsonAsync("/sash/api/v1/ai-conversations/credits-summary", token, ct);
-            var activity = TryGetJsonAsync("/sash/api/v1/ai-conversations/seat-activity", token, ct);
-            var campaign = TryGetJsonAsync("/sash/api/v1/me/campaigns", token, ct);
+            var endpoints = QoderEndpoints.ForRaw(acc.Region);
+            var usage = TryGetJsonAsync(endpoints, "/sash/api/v2/me/usage", token, ct);
+            var summary = TryGetJsonAsync(endpoints, "/sash/api/v1/ai-conversations/credits-summary", token, ct);
+            var activity = TryGetJsonAsync(endpoints, "/sash/api/v1/ai-conversations/seat-activity", token, ct);
+            var campaign = TryGetJsonAsync(endpoints, "/sash/api/v1/me/campaigns", token, ct);
             await Task.WhenAll(usage, summary, activity, campaign);
 
             var failures = new List<string>();
@@ -297,12 +299,12 @@ public sealed class QoderCreditsService
     }
 
     /// <summary>GET 并解析 JSON。失败返回 null，不抛——调用方按「该数据源不可用」处理。</summary>
-    private async Task<JsonDocument?> TryGetJsonAsync(string path, string token, CancellationToken ct)
+    private async Task<JsonDocument?> TryGetJsonAsync(QoderEndpoints endpoints, string path, string token, CancellationToken ct)
     {
         try
         {
             var http = _httpFactory.CreateClient(QoderHttp.ClientName);
-            using var req = new HttpRequestMessage(HttpMethod.Get, QoderConstants.OpenApiBaseUrl + path);
+            using var req = new HttpRequestMessage(HttpMethod.Get, endpoints.OpenApiUrl(path));
             ApplyAuthHeaders(req, token);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(RequestTimeout);

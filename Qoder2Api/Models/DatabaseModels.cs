@@ -9,8 +9,24 @@ public class AccountRecord
     public string? UserId { get; set; }
     public string? UserName { get; set; }
     public string? UserEmail { get; set; }
+
+    /// <summary>
+    /// 账号绑定的手机号。取自 <c>/api/v1/userinfo</c> 的 <c>security_mobile</c>
+    /// 字段——官方客户端就是这么取的（CN 客户端 fetchUser），不需要走短信/验证码那套。
+    ///
+    /// **国内版账号通常没有邮箱**（手机号注册），列表页在邮箱为空且是国内版时
+    /// 改显示这个字段。国际版账号多为 null。
+    /// </summary>
+    public string? UserPhone { get; set; }
     public string PlanName { get; set; } = "Pro";
     public string AuthMethod { get; set; } = "device"; // device, pat
+
+    /// <summary>
+    /// 账号所属区域："global"（国际版）/ "cn"（国内版）。
+    /// **可空**——老库里的账号没有这一列，NULL 一律按国际版处理，保证升级后行为不变。
+    /// 由 QoderEndpoints.ParseRegion 解析。
+    /// </summary>
+    public string? Region { get; set; }
     public string? JobToken { get; set; }
     public string? DeviceToken { get; set; }
     public string? PatToken { get; set; }

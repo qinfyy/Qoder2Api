@@ -410,9 +410,11 @@ public class QoderProxyService
         byte[] plainBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
         byte[] encodedBody = QoderEncoder.EncodeBody(plainBytes);
 
-        var headers = CosySigner.BuildCosyHeaders(encodedBody, QoderConstants.ChatURLEncoded, creds);
+        // 按账号区域取聊天端点（国际版 api3.qoder.sh / 国内版 gateway.qoder.com.cn）。
+        string chatUrl = creds.Endpoints.ChatUrlEncoded;
+        var headers = CosySigner.BuildCosyHeaders(encodedBody, chatUrl, creds);
 
-        var req = new HttpRequestMessage(HttpMethod.Post, QoderConstants.ChatURLEncoded);
+        var req = new HttpRequestMessage(HttpMethod.Post, chatUrl);
         foreach (var (k, v) in headers)
         {
             req.Headers.TryAddWithoutValidation(k, v);

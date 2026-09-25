@@ -14,6 +14,9 @@ public static class SchemaPatches
         ApplyPragmas(db, log);
         EnsureTable<PoolStateRecord>(db, log);
         SyncMissingColumns<UsageRecord>(db, log);
+        // 账号表补 Region 列（国内版支持）。列可空，老库补出来是 NULL，
+        // 由 QoderEndpoints.ParseRegion 按国际版处理。
+        SyncMissingColumns<AccountRecord>(db, log);
     }
 
     private static void ApplyPragmas(AppDbContext db, ILogger? log)

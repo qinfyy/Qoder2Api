@@ -15,25 +15,8 @@ public static class QoderHttp
 
 public static class QoderConstants
 {
-    // Endpoints
-    public const string ChatURLEncoded = "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1";
-    public const string ChatURL = "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common";
-    // 模型目录。与排队端点同坑：必须带 /algo 前缀与 Encode=1
-    //（客户端 SDK 常量 YNA = "/api/v2/model/list?Encode=1"，前缀由 WASM 的 prepareRequest 补）。
-    public const string ModelListURL = "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1";
-    public const string JobTokenExchangeURL = "https://openapi.qoder.sh/api/v1/jobToken/exchange";
-    public const string DeviceJobTokenURL = "https://openapi.qoder.sh/api/v1/me/jobToken";
-    /// <summary>
-    /// openapi 基址。Credits / 用量 / 活动等 /sash 接口都挂在这个域下。
-    /// 这些接口只要 Bearer token，不需要 api3.qoder.sh 那套 COSY 签名。
-    /// </summary>
-    public const string OpenApiBaseUrl = "https://openapi.qoder.sh";
-    public const string UserStatusURL = "https://openapi.qoder.sh/api/v3/user/status";
-    public const string UserInfoURL = "https://openapi.qoder.sh/api/v1/userinfo";
-    public const string DeviceLoginURL = "https://qoder.com/device/selectAccounts";
-    public const string DeviceTokenPollURL = "https://openapi.qoder.sh/api/v1/deviceToken/poll";
-    // 模型排队状态查询
-    public const string QueueStatusURL = "https://api3.qoder.sh/algo/api/v2/service/ask/queue/status";
+    // 上游域名与 URL 已按区域收敛到 QoderEndpoints（见 QoderEndpoints.cs）。
+    // 国际版 / 国内版只有域名与 OAuth client id 不同，路径完全一致。
 
     public const string IDEVersion = "1.0.0";
     public const string ClientType = "5";
@@ -53,7 +36,14 @@ public static class QoderConstants
     public const string StdAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     public const string CustomAlphabet = "_doRTgHZBKcGVjlvpC,@aFSx#DPuNJme&i*MzLOEn)sUrthbf%Y^w.(kIQyXqWA!";
 
-    // Default Client ID used in official OAuth handshake
+    /// <summary>
+    /// OAuth client id。**国际版与国内版共用同一个值**——两版客户端的产品描述符里
+    /// <c>authClientIds.prod</c> 逐字相同，所以它不参与区域区分，放在这里而不是
+    /// QoderEndpoints。
+    ///
+    /// 注意别和 <c>f5a7f67c-11a8-491e-8b8e-a07f2d0df4b7</c> 搞混：那是 VPC
+    /// 自定义接入域（customAccessDomain）场景按域名兜底的 id，正常账号不会用到。
+    /// </summary>
     public const string OfficialClientId = "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa";
 
     public class QoderModelDefinition

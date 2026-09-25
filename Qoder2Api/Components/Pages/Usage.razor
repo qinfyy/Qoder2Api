@@ -42,13 +42,13 @@
     <div class="metric-box">
         <div class="metric-label">累计消耗 Tokens</div>
         <div class="metric-value">@records.Sum(r => (long)r.TotalTokens).ToString("N0")</div>
-        <div class="metric-sub">提示词 + 生成结果</div>
+        <div class="metric-sub">提示词 + 补全结果</div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">深度思考推理 Tokens</div>
         <div class="metric-value">@records.Sum(r => (long)r.ReasoningTokens).ToString("N0")</div>
-        <div class="metric-sub">DeepSeek-R1 思维链生成量</div>
+        <div class="metric-sub">思维链生成量</div>
     </div>
 
     <div class="metric-box">
@@ -106,8 +106,8 @@
                 <tr>
                     <th>请求时间</th>
                     <th>调用模型</th>
-                    <th>输入 Tokens</th>
-                    <th>生成 Tokens</th>
+                    <th>提示 Tokens</th>
+                    <th>补全 Tokens</th>
                     <th>思考 Tokens</th>
                     <th>缓存命中</th>
                     <th>首字延迟</th>
@@ -190,26 +190,33 @@
 
     private Dictionary<string, Supplier> _supplierById = new(StringComparer.Ordinal);
 
-    /// <summary>邮箱优先（唯一且可读），其次用户名，最后 UID。悬停信息含三者全值。</summary>
+    /// <summary>
+    /// 显示名优先级：**邮箱 → 手机号 → 用户名 → UID**。
+    /// 国内版账号多为手机号注册、没有邮箱，用手机号兜底（见 QoderAuthService 的 security_mobile）。
+    /// 悬停信息含全部字段。
+    /// </summary>
     private static Supplier BuildSupplier(AccountRecord a)
     {
         string email = (a.UserEmail ?? "").Trim();
+        string phone = (a.UserPhone ?? "").Trim();
         string name = (a.UserName ?? "").Trim();
 
         string label = email.Length > 0 ? email
+            : phone.Length > 0 ? phone
             : name.Length > 0 ? name
             : a.Id;
 
         var parts = new List<string>();
         if (email.Length > 0) parts.Add(email);
+        if (phone.Length > 0) parts.Add(phone);
         if (name.Length > 0) parts.Add(name);
         parts.Add(a.Id);
         return new Supplier(label, string.Join(" · ", parts));
     }
 
     /// <summary>
-    /// 供应商列。邮箱优先——它比用户名更适合标识账号：用户名可能重复或为空，邮箱是唯一的。
-    /// 都没有则回落 UID（历史记录可能来自已删除的账号）。
+    /// 供应商列。**邮箱 → 手机号**——两者都比用户名更适合标识账号（用户名可能重复或为空）。
+    /// 都没有则回落用户名、最后 UID（历史记录可能来自已删除的账号）。
     /// </summary>
     private string SupplierName(string? accountId)
     {

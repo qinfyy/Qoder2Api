@@ -125,11 +125,18 @@
                     <tr>
                         <td>
                             <div style="font-weight: 600;">@(string.IsNullOrEmpty(acc.UserName) ? "Qoder 体验用户" : acc.UserName)</div>
-                            <div class="muted" style="font-size: 0.78rem;">@(string.IsNullOrEmpty(acc.UserEmail) ? "—" : acc.UserEmail)</div>
+                            @{
+                                var sub = AccountSubtitle(acc);
+                            }
+                            <div class="muted" style="font-size: 0.78rem;" title="@sub.Title">@sub.Text</div>
                         </td>
                         <td>
                             <span class="badge" style="background: var(--bg); font-size: 0.72rem;">
                                 @(acc.AuthMethod == "pat" ? "PAT" : "OAuth")
+                            </span>
+                            <span class="badge" style="background: var(--bg); font-size: 0.72rem;"
+                                  title="@RegionTitle(acc)">
+                                @RegionLabel(acc)
                             </span>
                             @if (acc.IsDefault)
                             {
@@ -342,6 +349,18 @@
                 @if (wizardStep == "select")
                 {
                     <p class="muted" style="margin: 0 0 0.5rem 0; font-size: 0.88rem;">请选择连接 Qoder 账号的方式：</p>
+
+                    <div class="form-field" style="margin-bottom: 0.9rem;">
+                        <div class="form-field-label"><span>账号区域</span></div>
+                        <select @bind="selectedRegion">
+                            <option value="@QoderRegion.Global">国际版</option>
+                            <option value="@QoderRegion.Cn">国内版</option>
+                        </select>
+                        <div class="muted" style="font-size: 0.75rem; margin-top: 0.35rem; line-height: 1.45;">
+                            两个区域是各自独立的站点，账号、PAT 与凭证互不相通。请按你注册 Qoder 的站点选择。
+                        </div>
+                    </div>
+
                     <div class="stack">
                         <button type="button" class="btn" style="display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem; text-align: left; height: auto;" @onclick='() => SetWizardStep("oauth")'>
                             <span style="font-size: 1.5rem; line-height: 1;">🌐</span>
@@ -423,13 +442,13 @@
                         </div>
 
                         <p class="muted" style="font-size: 0.85rem; margin: 0;">
-                            从您的 Qoder 个人中心获取 Personal Access Token 并粘贴在下方：
+                            从 <span class="mono">@SelectedRegionSite</span> 的个人中心获取 Personal Access Token 并粘贴在下方：
                         </p>
 
                         <div class="form-field">
                             <div class="form-field-label">
                                 <span>Personal Access Token</span>
-                                <a href="https://qoder.com/account/integrations" target="_blank" style="font-size: 0.75rem; font-weight: 400;">前往生成 PAT ↗</a>
+                                <a href="@SelectedRegionPatUrl" target="_blank" style="font-size: 0.75rem; font-weight: 400;">前往生成 PAT ↗</a>
                             </div>
                             <input type="password" class="mono" placeholder="pt-..." @bind="patInput" />
                         </div>
@@ -459,6 +478,14 @@
     // Wizard
     private bool isAddDialogOpen = false;
     private string wizardStep = "select"; // select, oauth, pat
+
+    /// <summary>本次新增账号的区域。OAuth 与 PAT 两条路径都按它走。</summary>
+    private QoderRegion selectedRegion = QoderRegion.Global;
+
+    /// <summary>当前所选区域对应的站点域名，用于 UI 文案与 PAT 生成页链接。</summary>
+    private string SelectedRegionSite => QoderEndpoints.For(selectedRegion).WebBase.Replace("https://", "");
+
+    private string SelectedRegionPatUrl => $"{QoderEndpoints.For(selectedRegion).WebBase}/account/integrations";
 
     // OAuth
     private string oauthStatus = "idle"; // idle, waiting, done, error
@@ -573,6 +600,30 @@
 
     private PoolAccountStatus? PoolStatusOf(string accountId) =>
         _statusById.TryGetValue(accountId, out var s) ? s : null;
+
+    /// <summary>
+    /// 账号副标题：**邮箱 → 手机号**。国内版账号多为手机号注册、没有邮箱，用手机号兜底。
+    /// 手机号取自 /api/v1/userinfo 的 security_mobile（见 QoderAuthService）。
+    /// </summary>
+    private static (string Text, string Title) AccountSubtitle(AccountRecord acc)
+    {
+        if (!string.IsNullOrWhiteSpace(acc.UserEmail))
+        {
+            return (acc.UserEmail, "邮箱");
+        }
+        if (!string.IsNullOrWhiteSpace(acc.UserPhone))
+        {
+            return (acc.UserPhone, "手机号");
+        }
+        return ("—", "无邮箱");
+    }
+
+    /// <summary>账号区域徽标。老账号没有该字段，按国际版显示。</summary>
+    private static string RegionLabel(AccountRecord acc) =>
+        QoderEndpoints.ParseRegion(acc.Region) == QoderRegion.Cn ? "国内版" : "国际版";
+
+    private static string RegionTitle(AccountRecord acc) =>
+        $"{RegionLabel(acc)} · {QoderEndpoints.ForRaw(acc.Region).OpenApiBase}";
 
     /// <summary>池状态徽章样式。复用现有 CSS 类，无需新增样式。</summary>
     private static string PoolBadgeClass(PoolAccountState state) => state switch
@@ -724,7 +775,7 @@
 
         try
         {
-            deviceState = AuthService.InitiateDeviceFlow();
+            deviceState = AuthService.InitiateDeviceFlow(selectedRegion);
 
             // Open in new tab
             await JS.InvokeVoidAsync("qoderHelper.openInNewTab", deviceState.VerificationUrl);
@@ -828,7 +879,7 @@
 
         try
         {
-            await AuthService.ConnectPatAsync(pat);
+            await AuthService.ConnectPatAsync(pat, selectedRegion);
             isSubmittingPat = false;
             CloseAddDialog();
             ShowToast("PAT 验证通过并已存入 SQLite 数据库！");

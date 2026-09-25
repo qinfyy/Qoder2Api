@@ -33,6 +33,7 @@ public static class ApiRoutes
                     id = active.Id,
                     userName = active.UserName,
                     userEmail = active.UserEmail,
+                    userPhone = active.UserPhone,
                     plan = active.PlanName,
                     authMethod = active.AuthMethod,
                     quota = active.Quota,

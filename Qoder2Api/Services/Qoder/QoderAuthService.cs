@@ -14,6 +14,9 @@ public class DeviceFlowState
     public string Verifier { get; set; } = "";
     public string MachineId { get; set; } = "";
     public string VerificationUrl { get; set; } = "";
+
+    /// <summary>本次登录针对的区域。轮询与落库都按它走（国际版 / 国内版域名不同）。</summary>
+    public QoderRegion Region { get; set; } = QoderRegion.Global;
 }
 
 public class QoderAuthService
@@ -75,8 +78,10 @@ public class QoderAuthService
 
     // --- OAuth PKCE Device Flow ---
 
-    public DeviceFlowState InitiateDeviceFlow()
+    public DeviceFlowState InitiateDeviceFlow(QoderRegion region = QoderRegion.Global)
     {
+        var ep = QoderEndpoints.For(region);
+
         byte[] verifierBytes = RandomNumberGenerator.GetBytes(32);
         string verifier = Convert.ToBase64String(verifierBytes)
             .TrimEnd('=')
@@ -92,20 +97,22 @@ public class QoderAuthService
         string nonce = Guid.NewGuid().ToString();
         string machineId = MachineId;
 
-        string url = $"{QoderConstants.DeviceLoginURL}?challenge={challenge}&challenge_method=S256&machine_id={machineId}&nonce={nonce}";
+        string url = $"{ep.DeviceLoginUrl}?challenge={challenge}&challenge_method=S256&machine_id={machineId}&nonce={nonce}";
 
         return new DeviceFlowState
         {
             Nonce = nonce,
             Verifier = verifier,
             MachineId = machineId,
-            VerificationUrl = url
+            VerificationUrl = url,
+            Region = region
         };
     }
 
     public async Task<bool> PollDeviceFlowAsync(DeviceFlowState state, CancellationToken ct = default)
     {
-        string pollUrl = $"{QoderConstants.DeviceTokenPollURL}?nonce={state.Nonce}&verifier={state.Verifier}&challenge_method=S256";
+        var endpoints = QoderEndpoints.For(state.Region);
+        string pollUrl = $"{endpoints.DeviceTokenPollUrl}?nonce={state.Nonce}&verifier={state.Verifier}&challenge_method=S256";
         using var req = new HttpRequestMessage(HttpMethod.Get, pollUrl);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
@@ -136,16 +143,21 @@ public class QoderAuthService
         // Fetch User Info
         string? name = null;
         string? email = null;
+        string? phone = null;
         try
         {
-            using var ureq = new HttpRequestMessage(HttpMethod.Get, QoderConstants.UserInfoURL);
+            using var ureq = new HttpRequestMessage(HttpMethod.Get, endpoints.UserInfoUrl);
             ureq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", activeJobToken);
             using var uresp = await Http.SendAsync(ureq, ct);
             if (uresp.IsSuccessStatusCode)
             {
                 var udoc = JsonDocument.Parse(await uresp.Content.ReadAsStringAsync(ct));
-                name = udoc.RootElement.TryGetProperty("name", out var np) ? np.GetString() : null;
-                email = udoc.RootElement.TryGetProperty("email", out var ep) ? ep.GetString() : null;
+                var uroot = udoc.RootElement;
+                name = FirstString(uroot, "name", "username", "user_name");
+                email = FirstString(uroot, "email");
+                // 手机号就在同一个响应里（字段名 security_mobile，官方客户端 fetchUser 同源）。
+                // 国内版账号多为手机号注册、没有邮箱，列表页靠这个字段兜底显示。
+                phone = FirstString(uroot, "security_mobile");
             }
         }
         catch { }
@@ -156,7 +168,7 @@ public class QoderAuthService
         bool exceeded = false;
         try
         {
-            using var sreq = new HttpRequestMessage(HttpMethod.Get, QoderConstants.UserStatusURL);
+            using var sreq = new HttpRequestMessage(HttpMethod.Get, endpoints.UserStatusUrl);
             sreq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", activeJobToken);
             using var sresp = await Http.SendAsync(sreq, ct);
             if (sresp.IsSuccessStatusCode)
@@ -176,8 +188,10 @@ public class QoderAuthService
             UserId = userId,
             UserName = name ?? "Qoder User",
             UserEmail = email ?? "",
+            UserPhone = phone,
             PlanName = plan,
             AuthMethod = "device",
+            Region = QoderEndpoints.ToStorageValue(state.Region),
             JobToken = activeJobToken,
             DeviceToken = deviceToken,
             RefreshToken = refreshToken,
@@ -202,14 +216,16 @@ public class QoderAuthService
         return true;
     }
 
-    public async Task<AccountRecord> ConnectPatAsync(string pat, string? targetAccountId = null, CancellationToken ct = default)
+    public async Task<AccountRecord> ConnectPatAsync(string pat, QoderRegion region = QoderRegion.Global, string? targetAccountId = null, CancellationToken ct = default)
     {
         pat = pat.Trim();
         if (string.IsNullOrWhiteSpace(pat))
             throw new ArgumentException("PAT cannot be empty.");
 
+        var endpoints = QoderEndpoints.For(region);
+
         // 1. Exchange PAT for JobToken
-        using var req = new HttpRequestMessage(HttpMethod.Post, QoderConstants.JobTokenExchangeURL);
+        using var req = new HttpRequestMessage(HttpMethod.Post, endpoints.JobTokenExchangeUrl);
         req.Content = new StringContent(
             JsonSerializer.Serialize(new { personal_token = pat }),
             Encoding.UTF8,
@@ -227,7 +243,7 @@ public class QoderAuthService
         var (jobToken, expiresAt) = ParseJobTokenResponse(body);
 
         // 2. Fetch User Status with JobToken
-        using var sreq = new HttpRequestMessage(HttpMethod.Get, QoderConstants.UserStatusURL);
+        using var sreq = new HttpRequestMessage(HttpMethod.Get, endpoints.UserStatusUrl);
         sreq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jobToken);
         using var sresp = await Http.SendAsync(sreq, ct);
         sresp.EnsureSuccessStatusCode();
@@ -242,6 +258,22 @@ public class QoderAuthService
         string plan = sroot.TryGetProperty("plan", out var pp) ? pp.GetString() ?? "Pro" : "Pro";
         double quota = sroot.TryGetProperty("quota", out var qp) ? qp.GetDouble() : 0;
         bool exceeded = sroot.TryGetProperty("isQuotaExceeded", out var exp2) && exp2.GetBoolean();
+
+        // 手机号只在 /api/v1/userinfo 里（user/status 不返回），单独取一次。
+        // 失败不影响登录：国内版靠它兜底显示，国际版本来也没有这个字段。
+        string? phone = null;
+        try
+        {
+            using var ureq = new HttpRequestMessage(HttpMethod.Get, endpoints.UserInfoUrl);
+            ureq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jobToken);
+            using var uresp = await Http.SendAsync(ureq, ct);
+            if (uresp.IsSuccessStatusCode)
+            {
+                using var udoc = JsonDocument.Parse(await uresp.Content.ReadAsStringAsync(ct));
+                phone = FirstString(udoc.RootElement, "security_mobile");
+            }
+        }
+        catch { }
 
         // 续期：就地更新已有账号（保留 Id / CreatedAt / IsDefault，不清 LastUsedAt）。
         // 新增：造一条新记录。
@@ -260,8 +292,14 @@ public class QoderAuthService
         acc.UserId = uid;
         acc.UserName = string.IsNullOrWhiteSpace(name) ? (acc.UserName ?? "Qoder PAT User") : name;
         acc.UserEmail = email;
+        // 只在取到新值时覆盖，避免上游临时不给该字段时把已存的手机号抹掉。
+        if (!string.IsNullOrWhiteSpace(phone))
+        {
+            acc.UserPhone = phone;
+        }
         acc.PlanName = plan;
         acc.AuthMethod = "pat";
+        acc.Region = QoderEndpoints.ToStorageValue(region);
         acc.PatToken = pat;
         acc.JobToken = jobToken;
         acc.ExpiresAt = expiresAt;
@@ -286,6 +324,22 @@ public class QoderAuthService
 
         OnAuthStateChanged?.Invoke();
         return acc;
+    }
+
+    private static string? FirstString(JsonElement root, params string[] keys)
+    {
+        foreach (string key in keys)
+        {
+            if (root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                string? s = v.GetString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    return s.Trim();
+                }
+            }
+        }
+        return null;
     }
 
     private static (string jobToken, DateTimeOffset expiresAt) ParseJobTokenResponse(string body)
@@ -331,7 +385,7 @@ public class QoderAuthService
                     // 直接接住返回值——旧实现这里又去 GetAccountById(acc.Id) 查了一次，
                     // 而当时的 ConnectPatAsync 把新 token 写进了**另一条新记录**，
                     // 于是查回来的是旧行、旧 token，续期等于没做。
-                    acc = await ConnectPatAsync(acc.PatToken, acc.Id, ct);
+                    acc = await ConnectPatAsync(acc.PatToken, QoderEndpoints.ParseRegion(acc.Region), acc.Id, ct);
                 }
                 catch (Exception ex)
                 {
@@ -350,7 +404,9 @@ public class QoderAuthService
             AuthToken: acc.JobToken!,
             Name: acc.UserName,
             Email: acc.UserEmail,
-            MachineID: MachineId
+            MachineID: MachineId,
+            // 区域随凭证一起传递：聊天 / 模型目录 / 排队三处都从 creds.Endpoints 取域名。
+            Region: QoderEndpoints.ParseRegion(acc.Region)
         );
     }
 
@@ -382,7 +438,7 @@ public class QoderAuthService
 
         if (string.IsNullOrEmpty(token) && acc.AuthMethod == "pat" && !string.IsNullOrEmpty(acc.PatToken))
         {
-            acc = await ConnectPatAsync(acc.PatToken, acc.Id, ct);
+            acc = await ConnectPatAsync(acc.PatToken, QoderEndpoints.ParseRegion(acc.Region), acc.Id, ct);
             token = acc.JobToken;
         }
 
@@ -391,7 +447,10 @@ public class QoderAuthService
             throw new InvalidOperationException("账户未持有有效的凭证令牌。");
         }
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, QoderConstants.UserStatusURL);
+        // 用户状态接口按账号区域取（国际版 openapi.qoder.sh / 国内版 openapi.qoder.com.cn）。
+        var endpoints = QoderEndpoints.ForRaw(acc.Region);
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, endpoints.UserStatusUrl);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
@@ -399,10 +458,10 @@ public class QoderAuthService
         if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && acc.AuthMethod == "pat" && !string.IsNullOrEmpty(acc.PatToken))
         {
             // Try refreshing PAT jobToken
-            acc = await ConnectPatAsync(acc.PatToken, acc.Id, ct);
+            acc = await ConnectPatAsync(acc.PatToken, QoderEndpoints.ParseRegion(acc.Region), acc.Id, ct);
             token = acc.JobToken;
 
-            using var retryReq = new HttpRequestMessage(HttpMethod.Get, QoderConstants.UserStatusURL);
+            using var retryReq = new HttpRequestMessage(HttpMethod.Get, endpoints.UserStatusUrl);
             retryReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             retryReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var retryResp = await Http.SendAsync(retryReq, ct);
