@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Qoder2Api.Models;
 using Qoder2Api.Services.Usage;
 
@@ -44,7 +43,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
     private readonly StreamReader _reader;
     private readonly CancellationTokenSource _linked;
     private readonly CancellationToken _outer;
-    private readonly string _requestedModel;
     private readonly string _accountId;
 
     private string? _primedJson;
@@ -65,7 +63,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         CancellationTokenSource linked,
         CancellationToken outer,
         string accountId,
-        string requestedModel,
         string modelKey,
         QoderRequestIds ids,
         UsageCollector usage)
@@ -75,7 +72,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         _linked = linked;
         _outer = outer;
         _accountId = accountId;
-        _requestedModel = requestedModel;
         ModelKey = modelKey;
         Ids = ids;
         Usage = usage;
@@ -126,7 +122,8 @@ public sealed class QoderStreamSession : IAsyncDisposable
                 }
 
                 // 有效业务 chunk：缓存下来（**绝不能丢**，否则首帧内容缺失），提交。
-                _primedJson = RewriteModel(parsed.InnerJson!, _requestedModel);
+                // 响应里的 model 字段原样透传上游，不改成请求模型。
+                _primedJson = parsed.InnerJson!;
                 ObserveUsage(parsed.InnerJson!);
                 return PrimeResult.Committed;
             }
@@ -196,10 +193,10 @@ public sealed class QoderStreamSession : IAsyncDisposable
                     // 纯用量 chunk：不当作内容转发（是否发给客户端由 include_usage 决定）。
                     if (IsUsageOnlyChunk(inner))
                     {
-                        yield return new StreamEvent(StreamEventKind.Usage, RewriteModel(inner, _requestedModel));
+                        yield return new StreamEvent(StreamEventKind.Usage, inner);
                         continue;
                     }
-                    yield return new StreamEvent(StreamEventKind.Chunk, RewriteModel(inner, _requestedModel));
+                    yield return new StreamEvent(StreamEventKind.Chunk, inner);
                     continue;
                 }
             }
@@ -236,28 +233,6 @@ public sealed class QoderStreamSession : IAsyncDisposable
         catch (JsonException)
         {
             return false;
-        }
-    }
-
-    private static string RewriteModel(string json, string model)
-    {
-        if (string.IsNullOrEmpty(model))
-        {
-            return json;
-        }
-        try
-        {
-            var node = JsonNode.Parse(json);
-            if (node is JsonObject obj && obj.ContainsKey("model"))
-            {
-                obj["model"] = model;
-                return obj.ToJsonString();
-            }
-            return json;
-        }
-        catch (JsonException)
-        {
-            return json;
         }
     }
 
@@ -425,7 +400,10 @@ public class QoderProxyService
         QoderRequestIds? ids = null,
         CancellationToken ct = default)
     {
-        var modelDef = QoderConstants.ResolveModel(request.Model);
+        var modelDef = QoderConstants.ResolveModel(request.Model)
+            ?? throw new QoderUpstreamException(
+                QoderErrorKind.ModelNotFound, StatusCodes.Status404NotFound, request.Model ?? "",
+                $"模型 {request.Model} 不存在（请在 models.xml 中登记）。");
         var requestIds = ids ?? QoderRequestIds.New();
         var payload = BuildQoderPayload(request, modelDef, requestIds);
 
@@ -499,7 +477,7 @@ public class QoderProxyService
             request.Tools?.Count ?? 0);
 
         var usage = new UsageCollector(promptEstimate);
-        return new QoderStreamSession(resp, reader, linked, ct, accountId, request.Model,
+        return new QoderStreamSession(resp, reader, linked, ct, accountId,
             modelDef.Key, requestIds, usage);
     }
 
@@ -548,6 +526,8 @@ public class QoderProxyService
         StringBuilder contentSb = new();
         StringBuilder reasoningSb = new();
         string finishReason = "stop";
+        // 响应模型原样透传上游；上游一直没给才退回请求模型。
+        string model = request.Model;
 
         await foreach (var ev in session.ReadEventsAsync(ct))
         {
@@ -562,6 +542,10 @@ public class QoderProxyService
                 if (root.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
                 {
                     id = idProp.GetString() ?? id;
+                }
+                if (root.TryGetProperty("model", out var modelProp) && modelProp.ValueKind == JsonValueKind.String)
+                {
+                    model = modelProp.GetString() ?? model;
                 }
                 if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
                 {
@@ -600,7 +584,7 @@ public class QoderProxyService
             id,
             @object = "chat.completion",
             created,
-            model = request.Model,
+            model,
             choices = new[]
             {
                 new

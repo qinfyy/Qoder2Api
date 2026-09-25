@@ -155,17 +155,15 @@
     <div class="card-title">
         <div>
             <h2>官方模型映射配置 (@QoderConstants.OfficialModels.Count 款模型已加载)</h2>
-            <div class="muted" style="font-size: 0.8rem; margin-top: 0.25rem;">
-                映射配置文件：<code class="mono" style="font-size: 0.78rem; background: var(--bg-hover); padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border-color);">@QoderConstants.ModelConfigPath</code> · 无论填写官方显示名、内部 Key 还是常用别名，均可精准映射识别
-            </div>
         </div>
         <div class="row-actions">
             <button type="button" class="secondary" style="font-size: 0.8rem;" @onclick="ReloadModelConfig">
-                🔄 重新加载 models.xml
+                重新加载 models.xml
             </button>
-            @* 倍率与错峰折扣是上游实时下发的，不在 models.xml 里维护，需要单独拉取 *@
+            @* 上游模型目录（模型清单 / 倍率 / 折扣）不在 models.xml 里维护，需要单独拉取。
+               后台每 2 分钟自动刷新已有模型；这里手动触发，会把上游新上的模型一并新增。 *@
             <button type="button" class="primary" style="font-size: 0.8rem;" @onclick="SyncFromUpstream" disabled="@isSyncing">
-                @(isSyncing ? "同步中…" : "⬇ 同步上游倍率/折扣")
+                @(isSyncing ? "同步中…" : "⬇ 同步上游模型目录")
             </button>
         </div>
     </div>
@@ -179,7 +177,6 @@
                     <th>倍率</th>
                     <th>特性</th>
                     <th>官方定位与描述</th>
-                    <th>常用别名</th>
                     <th style="text-align: right;">操作</th>
                 </tr>
             </thead>
@@ -235,14 +232,6 @@
                         </td>
                         <td style="font-size: 0.82rem; max-width: 320px; line-height: 1.45; color: var(--ink-secondary);">
                             @m.Description
-                        </td>
-                        <td>
-                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap; max-width: 220px;">
-                                @foreach (var a in m.Aliases.Take(3))
-                                {
-                                    <code class="mono" style="font-size: 0.75rem; background: var(--bg-hover); padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border-color);">@a</code>
-                                }
-                            </div>
                         </td>
                         <td style="text-align: right;">
                             <button type="button" class="btn secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" @onclick='() => CopyText(m.DisplayName)'>复制名称</button>
@@ -343,7 +332,7 @@
     private bool isSyncing = false;
 
     /// <summary>
-    /// 从上游拉取倍率与错峰折扣，写回 models.xml。
+    /// 从上游拉取模型目录（上游有、XML 里没有的模型一并新增），写回 models.xml。
     /// 直接调服务实例而非发 HTTP 请求——同进程内调用，省去一次自身往返。
     /// </summary>
     private async Task SyncFromUpstream()
@@ -351,11 +340,10 @@
         isSyncing = true;
         try
         {
-            bool ok = await CatalogRefresher.TryRefreshAsync();
-            var snap = CatalogRefresher.Catalog.Last;
-            ShowToast(ok
-                ? $"已同步上游模型信息：{snap.Models.Count} 个模型的倍率与折扣已写入 models.xml。"
-                : $"同步失败：{snap.Error ?? "未知原因"}", isError: !ok);
+            var r = await CatalogRefresher.SyncManualAsync();
+            ShowToast(r.Success
+                ? $"已同步上游模型目录：新增 {r.Added} 个，刷新 {r.Updated} 个。"
+                : $"同步失败：{r.Error ?? "未知原因"}", isError: !r.Success);
             StateHasChanged();
         }
         finally

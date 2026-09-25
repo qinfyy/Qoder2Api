@@ -148,55 +148,49 @@ public static class QoderConstants
         }
     }
 
+    /// <summary>
+    /// 从 models.xml 加载模型表。
+    ///
+    /// 文件缺失或解析不出内容时**保持为空**，不再回落到硬编码的默认模型表
+    /// （那等于把同一份模型清单在 C# 和 XML 里各维护一遍）。空表时所有请求都 404，
+    /// 需要管理员在设置页手动「同步上游模型目录」生成。
+    /// </summary>
     public static void ReloadModels(ILogger? logger = null)
     {
         lock (ModelLock)
         {
             string path = ModelConfigPath;
-            if (File.Exists(path))
+            if (!File.Exists(path))
             {
-                try
-                {
-                    var list = LoadFromXml(path);
-                    if (list is { Count: > 0 })
-                    {
-                        _officialModels = list;
-                        logger?.LogInformation("已从 {Path} 加载 {Count} 个模型", path, list.Count);
-                        return;
-                    }
-                    logger?.LogWarning("{Path} 中没有解析出任何模型，将使用内置默认值", path);
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogError(ex, "解析 {Path} 失败，将使用内置默认值", path);
-                }
-            }
-            else
-            {
-                logger?.LogInformation("{Path} 不存在，写入内置默认模型表供编辑", path);
+                _officialModels = [];
+                logger?.LogWarning("{Path} 不存在，模型表为空——请在设置页手动同步上游模型目录", path);
+                return;
             }
 
-            // 回落到内置默认值，并写出一份模板。
-            _officialModels = GetBuiltinDefaults();
             try
             {
-                string dir = Path.GetDirectoryName(path) ?? "";
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                var list = LoadFromXml(path);
+                _officialModels = list;
+                if (list.Count > 0)
                 {
-                    Directory.CreateDirectory(dir);
+                    logger?.LogInformation("已从 {Path} 加载 {Count} 个模型", path, list.Count);
                 }
-                SaveToXml(path, _officialModels);
+                else
+                {
+                    logger?.LogWarning("{Path} 中没有解析出任何模型，模型表为空", path);
+                }
             }
             catch (Exception ex)
             {
-                logger?.LogWarning(ex, "写入 {Path} 失败（不影响运行，仅无法生成模板）", path);
+                _officialModels = [];
+                logger?.LogError(ex, "解析 {Path} 失败，模型表为空", path);
             }
         }
     }
 
     private static List<QoderModelDefinition> LoadFromXml(string path)
     {
-        var doc = System.Xml.Linq.XDocument.Load(path);
+        var doc = XDocument.Load(path);
         var root = doc.Root;
         if (root is null)
         {
@@ -235,59 +229,75 @@ public static class QoderConstants
     }
 
     /// <summary>
-    /// 把上游模型目录的动态信息（倍率 / 是否免费 / 错峰折扣）合并进 models.xml。
+    /// 把上游模型目录合并进 models.xml。两种调用方行为不同：
     ///
-    /// **只更新已有的 key，不新增模型**：models.xml 里的别名与描述是人工维护的，
-    /// 上游目录没有这些信息，盲目新增会造出缺别名、缺描述的半成品条目。
-    /// 上游若出现了我们不知道的新模型，返回未匹配数，由人工补进 XML。
+    /// - <b>后台定时同步</b>（allowAdd = false）：只刷新已有模型的倍率 / 是否免费 / 错峰折扣。
+    ///   模型集合、以及人工维护的 displayName / 描述 / 别名一律不动——自动流程不该
+    ///   悄悄改动这个文件的内容。
+    /// - <b>管理员手动同步</b>（allowAdd = true）：上游有、XML 里没有的模型一并新增，
+    ///   用于首次生成 models.xml，或补上上游新上的模型。描述上游不提供，留空由人工补。
     /// </summary>
-    /// <returns>被更新的模型数。</returns>
-    public static int MergeUpstreamCatalog(IReadOnlyList<ModelCatalogEntry> upstream, ILogger? log = null)
+    /// <returns>新增与更新的模型数。</returns>
+    public static CatalogMergeResult MergeUpstreamCatalog(
+        IReadOnlyList<ModelCatalogEntry> upstream, bool allowAdd = false, ILogger? log = null)
     {
         if (upstream.Count == 0)
         {
-            return 0;
+            return new CatalogMergeResult(0, 0);
         }
-        var mapped = upstream.Select(u => new QoderModelDefinition
-        {
-            Key = u.Key,
-            PriceFactor = u.PriceFactor,
-            IsFree = u.IsFree,
-            PromotionLabel = u.PromotionLabel,
-            PromotionWindow = u.PromotionWindow,
-        }).ToList();
-        return MergeCore(mapped, log);
-    }
 
-    private static int MergeCore(IReadOnlyList<QoderModelDefinition> upstream, ILogger? log)
-    {
         lock (ModelLock)
         {
             var current = OfficialModels;
             var byKey = current.ToDictionary(m => m.Key, StringComparer.Ordinal);
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            int updated = 0;
-            var unknown = new List<string>();
+            int added = 0, updated = 0;
+            var skipped = new List<string>();
 
             foreach (var u in upstream)
             {
-                if (!byKey.TryGetValue(u.Key, out var target))
+                if (string.IsNullOrWhiteSpace(u.Key))
                 {
-                    unknown.Add(u.Key);
                     continue;
                 }
+
+                if (!byKey.TryGetValue(u.Key, out var target))
+                {
+                    if (!allowAdd)
+                    {
+                        skipped.Add(u.Key);
+                        continue;
+                    }
+
+                    // 新增：静态信息取自上游目录；描述上游没有，留空由人工补。
+                    target = new QoderModelDefinition
+                    {
+                        Key = u.Key,
+                        DisplayName = string.IsNullOrWhiteSpace(u.DisplayName) ? u.Key : u.DisplayName!,
+                        IsVl = u.IsVl ?? false,
+                        IsReasoning = u.IsReasoning ?? false,
+                        MaxInputTokens = u.MaxInputTokens is > 0 ? u.MaxInputTokens.Value : 128000,
+                    };
+                    current.Add(target);
+                    byKey[u.Key] = target;
+                    added++;
+                }
+                else
+                {
+                    updated++;
+                }
+
                 target.PriceFactor = u.PriceFactor;
                 target.IsFree = u.IsFree;
                 target.PromotionLabel = u.PromotionLabel;
                 target.PromotionWindow = u.PromotionWindow;
                 target.SyncedAtMs = now;
-                updated++;
             }
 
-            if (unknown.Count > 0)
+            if (skipped.Count > 0)
             {
-                log?.LogInformation("上游有 {Count} 个模型不在 models.xml 中，未自动新增：{Keys}",
-                    unknown.Count, string.Join(", ", unknown));
+                log?.LogInformation("上游有 {Count} 个模型不在 models.xml 中，自动同步不新增：{Keys}",
+                    skipped.Count, string.Join(", ", skipped));
             }
 
             try
@@ -299,7 +309,7 @@ public static class QoderConstants
                 log?.LogWarning(ex, "写回 models.xml 失败（内存已更新，重启后会丢失）");
             }
 
-            return updated;
+            return new CatalogMergeResult(added, updated);
         }
     }
 
@@ -322,7 +332,10 @@ public static class QoderConstants
                     new XElement("isReasoning", m.IsReasoning ? "true" : "false"),
                     new XElement("isVl", m.IsVl ? "true" : "false"),
                     new XElement("maxInputTokens", m.MaxInputTokens),
-                    new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a))),
+                    // 别名默认留空（displayName 已是官方名），空列表不写元素，避免生成 <aliases />
+                    m.Aliases.Count > 0
+                        ? new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a)))
+                        : null,
                     // 动态信息（由 /api/models/sync 从上游写入），无值时不写元素
                     m.PriceFactor is { } pf ? new XElement("priceFactor",
                         pf.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
@@ -339,27 +352,6 @@ public static class QoderConstants
 
     private static int ParseInt(string? s, int fallback) =>
         int.TryParse(s, out var v) && v > 0 ? v : fallback;
-
-    public static List<QoderModelDefinition> GetBuiltinDefaults() =>
-    [
-        new("qmodel_38max", "Qwen3.8-Max", "千问最新一代基座模型，2.4 万亿参数，在代码工程、专业办公、深度推理等核心场景全面领先", true, true, 180000, ["qwen3.8-max", "qwen-3.8-max", "qwen3.8max", "qwen-max", "qwen-max-latest"]),
-        new("qfmodel", "Qwen3.8-Flash", "千问开源权重的多模态 MoE 模型，在能力、延迟与成本间取得出色平衡", true, true, 180000, ["qwen3.8-flash", "qwen-3.8-flash", "qwen3.8flash", "qwen-flash", "qwen-flash-latest"]),
-        new("qmodel_latest", "Qwen3.7-Max", "千问旗舰模型，具备顶尖智能体执行能力，可自主完成长达 35 小时的复杂任务", true, true, 180000, ["qwen3.7-max", "qwen-3.7-max", "qwen3.7max"]),
-        new("qmodel", "Qwen3.7-Plus", "千问旗舰模型，增强推理和智能体能力，擅长编程与复杂问题解决", true, true, 180000, ["qwen3.7-plus", "qwen-3.7-plus", "qwen3.7plus", "qwen-plus", "qwen"]),
-        new("dmodel", "DeepSeek-V4-Pro", "深度求索正式版模型（DeepSeek-V4-Pro-0813），Agent 能力、世界知识与推理性能全面领先。", true, false, 128000, ["deepseek-v4-pro", "deepseek-r1", "deepseek-reasoner", "deepseek-v4", "r1"]),
-        new("dfmodel", "DeepSeek-V4-Flash", "深度求索正式版模型（DeepSeek-V4-Flash-0731），Agent 能力、世界知识与推理性能全面领先。", false, false, 128000, ["deepseek-v4-flash", "deepseek-v3", "deepseek-chat", "v3"]),
-        new("kmodel_latest", "Kimi-K3", "Kimi 迄今最强模型：2.8 万亿参数，面向软件工程、知识工作与深度推理而生", true, false, 200000, ["kimi-k3", "kimi-latest"]),
-        new("kmodel", "Kimi-K2.7-Code", "专为长上下文编程打造：精准遵循指令，可靠执行长链路任务", false, false, 200000, ["kimi-k2.7-code", "kimi-k2.7", "kimi-k2.5", "kimi"]),
-        new("gmodel", "GLM-5.3", "智谱旗舰模型，擅长复杂系统工程与长程任务", true, false, 128000, ["glm-5.3", "glm-5", "glm-4", "glm"]),
-        new("gfmodel", "GLM-5.3-Flash", "智谱全新原生多模态模型，深度理解图像与视频，自主完成研究分析、文档制作等复杂任务", false, true, 128000, ["glm-5.3-flash", "glm-flash"]),
-        new("mmodel", "MiniMax-M3", "原生多模态感知、前沿编码能力与 1M 上下文，驾驭高复杂度工作流", true, true, 1000000, ["minimax-m3", "minimax", "minimax-m2.5"]),
-        new("cmodel", "Cantus", "尝鲜体验全球顶级模型，擅长超长自主任务执行", true, false, 128000, ["cantus", "cmodel"]),
-        new("auto", "Auto", "智能选择最适合的模型，平衡性能与成本", false, true, 128000, ["default", "qoder"]),
-        new("ultimate", "Ultimate", "专家级深度推理与思考能力，极致输出质量。", true, false, 128000, ["极致", "qoder-ultimate"]),
-        new("performance", "Performance", "高级推理能力，高质量输出", false, false, 128000, ["性能", "qoder-performance"]),
-        new("efficient", "Efficient", "标准推理能力，高性价比", false, false, 128000, ["经济", "qoder-efficient"]),
-        new("lite", "Lite", "基础推理能力，免费使用（高峰期可能响应较慢）", false, false, 128000, ["轻量", "qoder-lite"])
-    ];
 
     public static string[] DefaultModels => GetAllModelIds().ToArray();
 
@@ -390,95 +382,29 @@ public static class QoderConstants
         return list;
     }
 
-    public static QoderModelDefinition ResolveModel(string? modelName)
+    /// <summary>
+    /// 把下游传来的模型名解析为已登记的模型定义。只做**精确匹配**
+    /// （key / displayName / alias，大小写不敏感），不做任何猜测性兜底：
+    /// 匹配不到就是没登记，返回 null，由调用方回 404。
+    /// </summary>
+    public static QoderModelDefinition? ResolveModel(string? modelName)
     {
         if (string.IsNullOrWhiteSpace(modelName))
         {
-            return OfficialModels.First(m => m.Key == "auto");
+            return null;
         }
 
         string raw = modelName.Trim();
-        if (raw.StartsWith("qoder/", StringComparison.OrdinalIgnoreCase))
-        {
-            raw = raw[6..].Trim();
-        }
 
-        var match = OfficialModels.FirstOrDefault(m =>
+        return OfficialModels.FirstOrDefault(m =>
             m.Key.Equals(raw, StringComparison.OrdinalIgnoreCase) ||
-            m.DisplayName.Equals(raw, StringComparison.OrdinalIgnoreCase)
-        );
-
-        if (match != null)
-            return match;
-
-        match = OfficialModels.FirstOrDefault(m =>
-            m.Aliases.Any(a => a.Equals(raw, StringComparison.OrdinalIgnoreCase))
-        );
-
-        if (match != null)
-            return match;
-
-        string norm = NormalizeIdentifier(raw);
-        match = OfficialModels.FirstOrDefault(m =>
-            NormalizeIdentifier(m.Key) == norm ||
-            NormalizeIdentifier(m.DisplayName) == norm ||
-            m.Aliases.Any(a => NormalizeIdentifier(a) == norm)
-        );
-
-        if (match != null)
-            return match;
-
-        string lower = raw.ToLowerInvariant();
-        if (lower.Contains("3.8-max") || lower.Contains("38max") || lower.Contains("3.8_max"))
-            return OfficialModels.First(m => m.Key == "qmodel_38max");
-
-        if (lower.Contains("3.8-flash") || lower.Contains("38flash") || lower.Contains("3.8_flash"))
-            return OfficialModels.First(m => m.Key == "qfmodel");
-
-        if (lower.Contains("3.7-max") || lower.Contains("37max") || lower.Contains("3.7_max"))
-            return OfficialModels.First(m => m.Key == "qmodel_latest");
-
-        if (lower.Contains("3.7-plus") || lower.Contains("37plus") || lower.Contains("3.7_plus"))
-            return OfficialModels.First(m => m.Key == "qmodel");
-
-        if (lower.StartsWith("qwen") || lower.StartsWith("qwq"))
-            return OfficialModels.First(m => m.Key == "qmodel_38max");
-
-        if (lower.Contains("r1") || lower.Contains("reasoner") || lower.Contains("v4-pro") || lower.Contains("v4pro"))
-            return OfficialModels.First(m => m.Key == "dmodel");
-
-        if (lower.Contains("v4-flash") || lower.Contains("v4flash") || lower.Contains("v3") || lower.Contains("chat"))
-            return OfficialModels.First(m => m.Key == "dfmodel");
-
-        if (lower.StartsWith("deepseek"))
-            return OfficialModels.First(m => m.Key == "dmodel");
-
-        if (lower.Contains("k3"))
-            return OfficialModels.First(m => m.Key == "kmodel_latest");
-
-        if (lower.StartsWith("kimi") || lower.StartsWith("moonshot"))
-            return OfficialModels.First(m => m.Key == "kmodel");
-
-        if (lower.Contains("flash") && (lower.StartsWith("glm") || lower.Contains("zhipu")))
-            return OfficialModels.First(m => m.Key == "gfmodel");
-
-        if (lower.StartsWith("glm") || lower.Contains("chatglm") || lower.Contains("zhipu"))
-            return OfficialModels.First(m => m.Key == "gmodel");
-
-        if (lower.StartsWith("minimax"))
-            return OfficialModels.First(m => m.Key == "mmodel");
-
-        if (lower.Contains("cantus"))
-            return OfficialModels.First(m => m.Key == "cmodel");
-
-        if (lower.Contains("claude") || lower.Contains("gpt") || lower.Contains("o1") || lower.Contains("o3"))
-            return OfficialModels.First(m => m.Key == "qmodel_38max");
-
-        return OfficialModels.First(m => m.Key == "auto");
+            m.DisplayName.Equals(raw, StringComparison.OrdinalIgnoreCase) ||
+            m.Aliases.Any(a => a.Equals(raw, StringComparison.OrdinalIgnoreCase)));
     }
+}
 
-    private static string NormalizeIdentifier(string input)
-    {
-        return new string(input.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-    }
+/// <summary>上游目录合并结果：新增了几个、刷新了几个。</summary>
+public readonly record struct CatalogMergeResult(int Added, int Updated)
+{
+    public int Total => Added + Updated;
 }

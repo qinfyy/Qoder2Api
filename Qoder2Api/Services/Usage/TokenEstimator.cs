@@ -1,13 +1,7 @@
 namespace Qoder2Api.Services.Usage;
 
-/// <summary>
-/// 本地 token 估算器，仅作兜底（上游实测优先，见 <see cref="UsageCollector"/>）。
-/// 口径：CJK 约 1 token/字，其余约 4 字符/token，每条消息 +3，整体再 +3。
-/// 不用真分词器是因为 Qoder 全是国产模型，cl100k 词表本就不匹配。
-/// </summary>
 public static class TokenEstimator
 {
-    /// <summary>估算一段文本的 token 数。</summary>
     public static int EstimateText(string? text)
     {
         if (string.IsNullOrEmpty(text))
@@ -34,9 +28,6 @@ public static class TokenEstimator
         return cjk + otherTokens;
     }
 
-    /// <summary>
-    /// 估算一次请求的 prompt 总量：逐条消息文本 + 每条的消息开销 + 工具定义 + 引导开销。
-    /// </summary>
     public static int EstimatePrompt(IEnumerable<string> messageTexts, int toolCount = 0)
     {
         int total = 3; // 回复引导开销
@@ -46,15 +37,11 @@ public static class TokenEstimator
         }
         if (toolCount > 0)
         {
-            total += toolCount * 8; // 工具定义的粗略开销（名称+描述+schema）
+            total += toolCount * 300; // 工具定义的粗略开销（名称+描述+schema）
         }
         return total;
     }
 
-    /// <summary>
-    /// 判定是否 CJK（中日韩）字符。这些字符在主流词表里普遍接近"一字一 token"，
-    /// 与拉丁文本的"四字符一 token"差一个量级，必须分开计。
-    /// </summary>
     private static bool IsCjk(char ch) => ch switch
     {
         >= '一' and <= '鿿' => true,   // CJK 统一表意文字

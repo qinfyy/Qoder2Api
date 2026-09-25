@@ -16,15 +16,27 @@ builder.Configuration
     .AddEnvironmentVariables()
     .AddCommandLine(args);
 
+var serverOptions = builder.Configuration
+    .GetSection(ServerOptions.SectionName)
+    .Get<ServerOptions>() ?? new ServerOptions();
+
+if (!string.IsNullOrWhiteSpace(serverOptions.Urls) && !HasExternalUrls(args))
+{
+    builder.WebHost.UseUrls(serverOptions.Urls);
+}
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-string saveDir = Path.Combine(Directory.GetCurrentDirectory(), "save");
-if (!Directory.Exists(saveDir))
+// SQLite 数据库。相对路径按内容根目录（cwd）解析，默认 save/SaveData.db。
+string dbPath = Path.IsPathRooted(serverOptions.DatabasePath)
+    ? serverOptions.DatabasePath
+    : Path.Combine(Directory.GetCurrentDirectory(), serverOptions.DatabasePath);
+string? dbDir = Path.GetDirectoryName(dbPath);
+if (!string.IsNullOrEmpty(dbDir) && !Directory.Exists(dbDir))
 {
-    Directory.CreateDirectory(saveDir);
+    Directory.CreateDirectory(dbDir);
 }
-string dbPath = Path.Combine(saveDir, "qoder2api.db");
 
 string connStr = $"Data Source={dbPath};Default Timeout=5";
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
@@ -90,3 +102,7 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static bool HasExternalUrls(string[] argv) =>
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS"))
+    || argv.Any(a => a.StartsWith("--urls", StringComparison.OrdinalIgnoreCase));

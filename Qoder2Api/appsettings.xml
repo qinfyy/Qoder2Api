@@ -11,6 +11,11 @@
 
   <AllowedHosts>*</AllowedHosts>
 
+  <Server>
+    <Urls>http://0.0.0.0:5000</Urls>
+    <DatabasePath>save/SaveData.db</DatabasePath>
+  </Server>
+
   <Pool>
     <!-- 单请求最多换几个账号。 -->
     <MaxRotate>3</MaxRotate>
@@ -68,13 +73,16 @@
 
     <!-- 单次排队状态查询的超时。 -->
     <PollRequestTimeout>00:00:30</PollRequestTimeout>
+
+    <!-- 排队期间向下游发 SSE 保活注释的间隔（防止长静默把下游读超时拖断）。0 = 关闭。 -->
+    <KeepAliveInterval>00:00:10</KeepAliveInterval>
   </Queue>
 
 
   <!-- 后台刷新周期。设为 0 关闭该项（改为纯手动）。 -->
   <Refresh>
-    <!-- 模型目录（倍率 / 错峰折扣）同步周期。客户端自身是 2 分钟，服务端无需跟那么紧。 -->
-    <ModelCatalog>00:05:00</ModelCatalog>
+    <!-- 模型目录（倍率 / 错峰折扣）同步周期。与官方客户端一致：2 分钟。 -->
+    <ModelCatalog>00:02:00</ModelCatalog>
   </Refresh>
 
 </configuration>

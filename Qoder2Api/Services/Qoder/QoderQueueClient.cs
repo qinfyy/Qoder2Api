@@ -49,7 +49,8 @@ public sealed class QoderQueueClient
         QoderQueueContext? initial,
         CosyCreds creds,
         TimeSpan alreadyWaited,
-        CancellationToken ct)
+        CancellationToken ct,
+        IQueueWaitObserver? observer = null)
     {
         var startedAt = DateTimeOffset.UtcNow;
         // MaxWait 是跨恢复轮次的累计预算（对齐官方客户端 n = maxWaitMs - waitMs），
@@ -85,7 +86,7 @@ public sealed class QoderQueueClient
                 var interval = ResolveInterval(current, _opt);
                 var remaining = deadline - DateTimeOffset.UtcNow;
                 var sleep = interval < remaining ? interval : remaining;
-                if (sleep > TimeSpan.Zero && !await SleepAsync(sleep, ct))
+                if (sleep > TimeSpan.Zero && !await DelayAsync(observer, sleep, ct))
                 {
                     return new QueueWaitResult(QueueWaitOutcome.Cancelled, Elapsed(startedAt), pollCount);
                 }
@@ -140,13 +141,21 @@ public sealed class QoderQueueClient
             consecutiveFailures = 0;
             current = poll.Queue ?? current;
 
+            if (observer is not null)
+            {
+                // 把最新排队进度交给观察者（例如转成下游 SSE 保活行）。
+                var progress = new QueueProgress(
+                    current.QueueType, current.QueueCount, current.WaitTime, current.ServiceAvailable);
+                await observer.OnPollAsync(progress, TimeSpan.FromMilliseconds(Elapsed(startedAt)), pollCount, ct);
+            }
+
             if (current.IsQueued == false)
             {
                 // 排到了。服务端可能还给了一个 retryAfterSeconds，等完再发起推理。
                 var extra = ResolveInterval(current, _opt);
                 var remaining = deadline - DateTimeOffset.UtcNow;
                 var sleep = extra < remaining ? extra : remaining;
-                if (sleep > TimeSpan.Zero && !await SleepAsync(sleep, ct))
+                if (sleep > TimeSpan.Zero && !await DelayAsync(observer, sleep, ct))
                 {
                     return new QueueWaitResult(QueueWaitOutcome.Cancelled, Elapsed(startedAt), pollCount);
                 }
@@ -257,6 +266,10 @@ public sealed class QoderQueueClient
         if (ms > opt.MaxPollInterval) ms = opt.MaxPollInterval;
         return ms;
     }
+
+    // 有观察者时由它负责等待（可切小片发保活），否则退回朴素 Task.Delay。
+    private static Task<bool> DelayAsync(IQueueWaitObserver? observer, TimeSpan d, CancellationToken ct) =>
+        observer is null ? SleepAsync(d, ct) : observer.DelayAsync(d, ct);
 
     private static async Task<bool> SleepAsync(TimeSpan d, CancellationToken ct)
     {

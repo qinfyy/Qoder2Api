@@ -4,11 +4,6 @@ using Qoder2Api.Models;
 
 namespace Qoder2Api.Services.Usage;
 
-/// <summary>
-/// 采集一次请求的用量，装配成 OpenAI 规范的 usage。优先级：上游 usage &gt; credits &gt; 本地估算。
-/// 哨兵原则：没观测到留 null，绝不写 0（"测得 0" 与 "没观测到" 是两回事）。
-/// 每请求一个实例，单消费循环使用，无需加锁。
-/// </summary>
 public sealed class UsageCollector
 {
     private readonly int _promptEstimate;
@@ -16,36 +11,26 @@ public sealed class UsageCollector
     private readonly StringBuilder _reasoning = new();
     private UsageInfo? _upstream;
 
-    /// <param name="promptEstimate">
-    /// prompt 的本地估算值（请求发出前算好）。只在拿不到上游 usage 时才用得上。
-    /// </param>
     public UsageCollector(int promptEstimate)
     {
         _promptEstimate = promptEstimate;
     }
 
-    /// <summary>是否拿到了上游的真实用量。</summary>
     public bool HasUpstream => _upstream is not null;
 
-    /// <summary>上游给出的计费额（Qoder 私有字段），无则 null。</summary>
     public double? Credits => _upstream?.Credits;
 
-    /// <summary>累计的输出字符数（用于观测，不参与计费）。</summary>
     public int OutputChars => _content.Length + _reasoning.Length;
 
-    /// <summary>
-    /// 观察一个已解析的上游 chunk（内层 body 的 JSON）。
-    /// 同时承担两件事：累积内容（供估算兜底）与捕获 usage。
-    /// </summary>
     public void ObserveChunk(JsonElement root)
     {
-        // 1. usage 捕获：上游的用量 chunk 形如 {"choices":[],"usage":{...}}。
+        // usage 捕获：上游的用量 chunk 形如 {"choices":[],"usage":{...}}。
         if (root.TryGetProperty("usage", out var usageEl) && usageEl.ValueKind == JsonValueKind.Object)
         {
             _upstream = ParseUsage(usageEl);
         }
 
-        // 2. 内容累积（估算兜底用）。
+        // 内容累积（估算兜底用）。
         if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
         {
             return;
@@ -67,12 +52,8 @@ public sealed class UsageCollector
         }
     }
 
-    /// <summary>
-    /// 直接注入一个上游 usage（非流式聚合路径用——那里已经把 usage 对象取出来了）。
-    /// </summary>
     public void ObserveUpstream(UsageInfo usage) => _upstream = usage;
 
-    /// <summary>装配最终的 usage。</summary>
     public UsageInfo Build()
     {
         if (_upstream is not null)
@@ -99,10 +80,6 @@ public sealed class UsageCollector
         };
     }
 
-    /// <summary>
-    /// 解析上游 usage。字段可能整体缺失（实测 9 条流有 4 条没有 completion_tokens_details），
-    /// 缺失一律留 null。
-    /// </summary>
     public static UsageInfo ParseUsage(JsonElement usage)
     {
         var info = new UsageInfo

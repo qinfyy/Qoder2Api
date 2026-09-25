@@ -10,11 +10,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Xml" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="appsettings.xml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="appsettings.*.xml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="models.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

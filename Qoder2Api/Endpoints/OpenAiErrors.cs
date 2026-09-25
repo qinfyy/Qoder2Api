@@ -33,6 +33,12 @@ public static class OpenAiErrors
     public static IResult NoAccount(string message) =>
         Json(StatusCodes.Status503ServiceUnavailable, message, "api_error", "no_healthy_account");
 
+    /// <summary>模型不存在。对齐 OpenAI 的 model_not_found（404）。</summary>
+    public static IResult ModelNotFound(string? model) =>
+        Json(StatusCodes.Status404NotFound,
+            $"模型 `{model}` 不存在（请在 models.xml 中登记）。",
+            "invalid_request_error", "model_not_found", "model");
+
     public static IResult FromUpstream(QoderUpstreamException ex)
     {
         var (status, fallback) = ex.Kind switch
@@ -61,6 +67,9 @@ public static class OpenAiErrors
             QoderErrorKind.BadParams => (
                 StatusCodes.Status400BadRequest,
                 "请求参数不被上游接受。"),
+            QoderErrorKind.ModelNotFound => (
+                StatusCodes.Status404NotFound,
+                "模型不存在。"),
             QoderErrorKind.Transport => (
                 StatusCodes.Status502BadGateway,
                 "无法连接到上游服务（网络/链路问题），请稍后重试。"),

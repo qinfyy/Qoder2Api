@@ -58,6 +58,21 @@ public static class ChatEndpoint
             return OpenAiErrors.Unauthorized("API Key 无效或缺失。");
         }
 
+        // 模型名必须能在 models.xml 里精确命中（key / displayName / alias），
+        // 否则直接 404——不做任何猜测性兜底。
+        if (QoderConstants.ResolveModel(request.Model) is null)
+        {
+            db.LogUsage(new UsageRecord
+            {
+                Model = request.Model,
+                HttpStatus = StatusCodes.Status404NotFound,
+                Status = "error",
+                ErrorMessage = "模型不存在",
+                LatencyMs = sw.ElapsedMilliseconds,
+            });
+            return OpenAiErrors.ModelNotFound(request.Model);
+        }
+
         if (!pool.HasUsableAccount())
         {
             db.LogUsage(new UsageRecord
@@ -73,7 +88,15 @@ public static class ChatEndpoint
 
         string? boundAccountId = string.IsNullOrEmpty(key?.AccountId) ? null : key.AccountId;
         bool isStream = request.Stream == true;
+        var qOpts = queueOptions.Value;
         var tried = new HashSet<string>(StringComparer.Ordinal);
+
+        // 排队期间向下游发 SSE 保活。官方客户端用 model_queue_status 事件让 UI 显示"排队中"，
+        // 本代理没有这条通道，只能用 SSE 注释行维持连接。仅流式请求适用——非流式必须一次性
+        // 返回一个 JSON，中途发不了东西。
+        IQueueWaitObserver? queueObserver = isStream && qOpts.KeepAliveInterval > TimeSpan.Zero
+            ? new SseQueueKeepAlive(context, logFactory.CreateLogger<SseQueueKeepAlive>(), qOpts.KeepAliveInterval)
+            : null;
 
         AccountLease? lease = null;
         QoderStreamSession? session = null;
@@ -113,7 +136,7 @@ public static class ChatEndpoint
             }
 
             var outcome = await ServeOnAccountAsync(
-                request, proxy, queue, queueOptions.Value, pool, held.AccountId, creds, log, ct,
+                request, proxy, queue, qOpts, pool, held.AccountId, creds, log, queueObserver, ct,
                 s => session = s,
                 e => lastError = e);
 
@@ -148,6 +171,16 @@ public static class ChatEndpoint
                 Status = "error",
                 ErrorMessage = lastError?.Message ?? "重试后仍无可用账号",
             });
+
+            if (context.Response.HasStarted)
+            {
+                // 排队保活已经把响应开成了 200 流，此时头已只读，只能把错误写进流里。
+                var streamError = lastError ?? new QoderUpstreamException(
+                    QoderErrorKind.Server, null, "", "重试后仍无可用账号");
+                await TryWriteStreamErrorAsync(context, streamError, ct);
+                return Results.Empty;
+            }
+
             return lastError is not null ? OpenAiErrors.FromUpstream(lastError) : OpenAiErrors.NoAccount("重试后仍无可用账号，请稍后再试。");
         }
 
@@ -163,6 +196,7 @@ public static class ChatEndpoint
         string accountId,
         CosyCreds creds,
         ILogger log,
+        IQueueWaitObserver? queueObserver,
         CancellationToken ct,
         Action<QoderStreamSession> onCommitted,
         Action<QoderUpstreamException> onError)
@@ -222,7 +256,8 @@ public static class ChatEndpoint
                             queueRecoveries + 1);
 
                         var wait = await queue.WaitUntilReadyAsync(
-                            requestSetId, modelKey, queueCtx?.QueueType, queueCtx, creds, queuedSoFar, ct);
+                            requestSetId, modelKey, queueCtx?.QueueType, queueCtx, creds, queuedSoFar, ct,
+                            queueObserver);
                         queuedSoFar += TimeSpan.FromMilliseconds(wait.WaitedMs);
 
                         switch (wait.Outcome)
@@ -301,9 +336,13 @@ public static class ChatEndpoint
 
         try
         {
-            context.Response.Headers.ContentType = "text/event-stream";
-            context.Response.Headers.CacheControl = "no-cache";
-            context.Response.Headers.Append("X-Accel-Buffering", "no");
+            // 响应可能已被排队保活提前开成流，此时头已只读。
+            if (!context.Response.HasStarted)
+            {
+                context.Response.Headers.ContentType = "text/event-stream";
+                context.Response.Headers.CacheControl = "no-cache";
+                context.Response.Headers.Append("X-Accel-Buffering", "no");
+            }
 
             await foreach (var ev in session.ReadEventsAsync(ct))
             {
@@ -426,6 +465,8 @@ public static class ChatEndpoint
         var contentSb = new StringBuilder();
         var reasoningSb = new StringBuilder();
         string finishReason = "stop";
+        // 响应模型原样透传上游；上游一直没给才退回请求模型。
+        string model = request.Model;
 
         await foreach (var ev in session.ReadEventsAsync(ct))
         {
@@ -444,6 +485,10 @@ public static class ChatEndpoint
                 if (root.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
                 {
                     id = idProp.GetString() ?? id;
+                }
+                if (root.TryGetProperty("model", out var modelProp) && modelProp.ValueKind == JsonValueKind.String)
+                {
+                    model = modelProp.GetString() ?? model;
                 }
                 if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
                 {
@@ -481,7 +526,7 @@ public static class ChatEndpoint
             id,
             @object = "chat.completion",
             created,
-            model = request.Model,
+            model,
             choices = new[]
             {
                 new
@@ -505,7 +550,6 @@ public static class ChatEndpoint
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
-
 
     private static (bool Ok, ApiKeyRecord? Key) ResolveKey(QoderAuthService auth, HttpContext context)
     {

@@ -28,6 +28,9 @@ public enum QoderErrorKind
     /// <summary>上游 404。</summary>
     NotFound,
 
+    /// <summary>请求的模型不存在（下游传了未登记的模型名）。</summary>
+    ModelNotFound,
+
     /// <summary>上游 5xx。</summary>
     Server,
 
@@ -56,6 +59,8 @@ public static class QoderErrorKindExtensions
     {
         QoderErrorKind.ContentBlocked => false,
         QoderErrorKind.PromptTooLong => false,
+        QoderErrorKind.BadParams => false,
+        QoderErrorKind.ModelNotFound => false,
         QoderErrorKind.None => false,
         _ => true,
     };
@@ -65,6 +70,7 @@ public static class QoderErrorKindExtensions
         QoderErrorKind.ContentBlocked => false,
         QoderErrorKind.PromptTooLong => false,
         QoderErrorKind.BadParams => false,
+        QoderErrorKind.ModelNotFound => false,
         QoderErrorKind.None => false,
         // 排队是正常状态，不是账号的错——惩罚它只会把健康账号冷却掉，
         // 反而逼着请求去换号、丢 prompt 缓存。
@@ -90,6 +96,7 @@ public static class QoderErrorKindExtensions
         QoderErrorKind.ModelRateLimit => "model_rate_limited",
         QoderErrorKind.SessionDead => "session_expired",
         QoderErrorKind.NotFound => "upstream_not_found",
+        QoderErrorKind.ModelNotFound => "model_not_found",
         QoderErrorKind.Server => "upstream_error",
         QoderErrorKind.Transport => "upstream_unreachable",
         QoderErrorKind.AccountFault => "account_forbidden",

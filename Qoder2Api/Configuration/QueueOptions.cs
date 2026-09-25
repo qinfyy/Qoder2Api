@@ -26,4 +26,6 @@ public sealed class QueueOptions
 
     /// <summary>单次排队状态查询超时。</summary>
     public TimeSpan PollRequestTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(10);
 }

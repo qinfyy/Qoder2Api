@@ -6,18 +6,9 @@
     <isReasoning>true</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>180000</maxInputTokens>
-    <aliases>
-      <alias>qwen3.8-max</alias>
-      <alias>qwen-3.8-max</alias>
-      <alias>qwen3.8max</alias>
-      <alias>qwen-max</alias>
-      <alias>qwen-max-latest</alias>
-    </aliases>
-    <priceFactor>0.2</priceFactor>
+    <priceFactor>0.5</priceFactor>
     <isFree>true</isFree>
-    <promotionLabel>错峰 4 折</promotionLabel>
-    <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="qfmodel">
     <displayName>Qwen3.8-Flash</displayName>
@@ -25,16 +16,9 @@
     <isReasoning>true</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>180000</maxInputTokens>
-    <aliases>
-      <alias>qwen3.8-flash</alias>
-      <alias>qwen-3.8-flash</alias>
-      <alias>qwen3.8flash</alias>
-      <alias>qwen-flash</alias>
-      <alias>qwen-flash-latest</alias>
-    </aliases>
     <priceFactor>0</priceFactor>
     <isFree>true</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="qmodel_latest">
     <displayName>Qwen3.7-Max</displayName>
@@ -42,15 +26,8 @@
     <isReasoning>true</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>180000</maxInputTokens>
-    <aliases>
-      <alias>qwen3.7-max</alias>
-      <alias>qwen-3.7-max</alias>
-      <alias>qwen3.7max</alias>
-    </aliases>
-    <priceFactor>0.1</priceFactor>
-    <promotionLabel>错峰2折</promotionLabel>
-    <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <priceFactor>0.5</priceFactor>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="qmodel">
     <displayName>Qwen3.7-Plus</displayName>
@@ -58,17 +35,8 @@
     <isReasoning>true</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>180000</maxInputTokens>
-    <aliases>
-      <alias>qwen3.7-plus</alias>
-      <alias>qwen-3.7-plus</alias>
-      <alias>qwen3.7plus</alias>
-      <alias>qwen-plus</alias>
-      <alias>qwen</alias>
-    </aliases>
     <priceFactor>0.1</priceFactor>
-    <promotionLabel>错峰4折</promotionLabel>
-    <promotionWindow>22:00-08:00</promotionWindow>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="dmodel">
     <displayName>DeepSeek-V4-Pro</displayName>
@@ -76,16 +44,9 @@
     <isReasoning>true</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>deepseek-v4-pro</alias>
-      <alias>deepseek-r1</alias>
-      <alias>deepseek-reasoner</alias>
-      <alias>deepseek-v4</alias>
-      <alias>r1</alias>
-    </aliases>
     <priceFactor>0.5</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="dfmodel">
     <displayName>DeepSeek-V4-Flash</displayName>
@@ -93,15 +54,9 @@
     <isReasoning>false</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>deepseek-v4-flash</alias>
-      <alias>deepseek-v3</alias>
-      <alias>deepseek-chat</alias>
-      <alias>v3</alias>
-    </aliases>
     <priceFactor>0.1</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="kmodel_latest">
     <displayName>Kimi-K3</displayName>
@@ -109,13 +64,9 @@
     <isReasoning>true</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>200000</maxInputTokens>
-    <aliases>
-      <alias>kimi-k3</alias>
-      <alias>kimi-latest</alias>
-    </aliases>
     <priceFactor>1.4</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="kmodel">
     <displayName>Kimi-K2.7-Code</displayName>
@@ -123,15 +74,9 @@
     <isReasoning>false</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>200000</maxInputTokens>
-    <aliases>
-      <alias>kimi-k2.7-code</alias>
-      <alias>kimi-k2.7</alias>
-      <alias>kimi-k2.5</alias>
-      <alias>kimi</alias>
-    </aliases>
     <priceFactor>0.8</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="gmodel">
     <displayName>GLM-5.3</displayName>
@@ -139,15 +84,9 @@
     <isReasoning>true</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>glm-5.3</alias>
-      <alias>glm-5</alias>
-      <alias>glm-4</alias>
-      <alias>glm</alias>
-    </aliases>
     <priceFactor>0.8</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="gfmodel">
     <displayName>GLM-5.3-Flash</displayName>
@@ -155,12 +94,8 @@
     <isReasoning>false</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>glm-5.3-flash</alias>
-      <alias>glm-flash</alias>
-    </aliases>
     <priceFactor>0.1</priceFactor>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="mmodel">
     <displayName>MiniMax-M3</displayName>
@@ -168,14 +103,9 @@
     <isReasoning>true</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>1000000</maxInputTokens>
-    <aliases>
-      <alias>minimax-m3</alias>
-      <alias>minimax</alias>
-      <alias>minimax-m2.5</alias>
-    </aliases>
     <priceFactor>0.2</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="cmodel">
     <displayName>Cantus</displayName>
@@ -183,73 +113,49 @@
     <isReasoning>true</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>cantus</alias>
-      <alias>cmodel</alias>
-    </aliases>
   </model>
   <model key="auto">
-    <displayName>Auto</displayName>
+    <displayName>auto</displayName>
     <description>智能选择最适合的模型，平衡性能与成本</description>
     <isReasoning>false</isReasoning>
     <isVl>true</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>default</alias>
-      <alias>qoder</alias>
-    </aliases>
     <priceFactor>0.5</priceFactor>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="ultimate">
-    <displayName>Ultimate</displayName>
+    <displayName>ultimate</displayName>
     <description>专家级深度推理与思考能力，极致输出质量。</description>
     <isReasoning>true</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>极致</alias>
-      <alias>qoder-ultimate</alias>
-    </aliases>
     <priceFactor>2</priceFactor>
     <isFree>false</isFree>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="performance">
-    <displayName>Performance</displayName>
+    <displayName>performance</displayName>
     <description>高级推理能力，高质量输出</description>
     <isReasoning>false</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>性能</alias>
-      <alias>qoder-performance</alias>
-    </aliases>
     <priceFactor>1.1</priceFactor>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="efficient">
-    <displayName>Efficient</displayName>
+    <displayName>efficient</displayName>
     <description>标准推理能力，高性价比</description>
     <isReasoning>false</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>经济</alias>
-      <alias>qoder-efficient</alias>
-    </aliases>
     <priceFactor>0.3</priceFactor>
-    <syncedAtMs>1790267656269</syncedAtMs>
+    <syncedAtMs>1790331121083</syncedAtMs>
   </model>
   <model key="lite">
-    <displayName>Lite</displayName>
+    <displayName>lite</displayName>
     <description>基础推理能力，免费使用（高峰期可能响应较慢）</description>
     <isReasoning>false</isReasoning>
     <isVl>false</isVl>
     <maxInputTokens>128000</maxInputTokens>
-    <aliases>
-      <alias>轻量</alias>
-      <alias>qoder-lite</alias>
-    </aliases>
   </model>
 </models>

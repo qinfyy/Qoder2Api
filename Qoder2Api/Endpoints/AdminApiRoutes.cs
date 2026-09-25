@@ -17,18 +17,21 @@ public static class AdminApiRoutes
         app.MapGet("/api/pool/status", (QoderPool pool) => Results.Ok(pool.Snapshot()));
 
         /// 向上游拉取模型目录（倍率 / 是否免费 / 错峰折扣），合并进 models.xml 落盘。
+        /// 手动同步会把上游有、XML 里没有的模型一并新增——后台定时同步不会。
         app.MapPost("/api/models/sync", async (ModelCatalogRefresher refresher, CancellationToken ct) =>
         {
-            bool ok = await refresher.TryRefreshAsync(ct);
-            return ok
+            var outcome = await refresher.SyncManualAsync(ct);
+            return outcome.Success
                 ? Results.Ok(new
                   {
                       success = true,
+                      added = outcome.Added,
+                      updated = outcome.Updated,
                       fetchedAt = refresher.Catalog.Last.FetchedAt,
                       upstreamCount = refresher.Catalog.Last.Models.Count,
                       path = QoderConstants.ModelConfigPath,
                   })
-                : Results.Ok(new { success = false, error = refresher.Catalog.Last.Error ?? "拉取失败" });
+                : Results.Ok(new { success = false, error = outcome.Error ?? "拉取失败" });
         });
 
         /// 解冻：清空该账号的全部惩罚状态（冷却/熔断/降权/自动禁用），立刻回池。
