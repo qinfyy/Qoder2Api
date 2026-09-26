@@ -342,10 +342,6 @@ public class QoderAuthService
         return null;
     }
 
-    /// <summary>
-    /// 空串 / 空白一律换成"取不到"时的占位值。上游偶尔返回 <c>""</c> 或 null，
-    /// 那和"没有这个字段"是一回事——都不能当成 Pro。
-    /// </summary>
     private static string NonEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? QoderConstants.UnknownPlan : value;
 
@@ -373,13 +369,6 @@ public class QoderAuthService
         return (token, DateTimeOffset.UtcNow.AddMilliseconds(expiresInMs));
     }
 
-    /// <summary>
-    /// 导入 **cockpit-tools** 导出的账号 JSON（见 <see cref="QoderAccountImporter"/>）。
-    ///
-    /// 去重按 <c>UserId</c> 而非 cockpit 的 <c>id</c>——后者是那套工具自己的主键，
-    /// 与本项目无关。命中已有账号时**只刷新凭证与资料**，保留 Id / 创建时间 /
-    /// 首选标记 / 启停状态，避免一次导入把用户的手工设置冲掉。
-    /// </summary>
     public QoderAccountImporter.ImportResult ImportFromCockpitJson(string json, QoderRegion region)
     {
         var parsed = QoderAccountImporter.Parse(json, region);

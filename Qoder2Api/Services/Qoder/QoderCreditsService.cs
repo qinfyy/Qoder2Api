@@ -4,15 +4,12 @@ using Qoder2Api.Models;
 
 namespace Qoder2Api.Services.Qoder;
 
-/// <summary>
-/// 单个活动（campaigns 数组的一项）。逆向自客户端日志里 /sash/api/v1/me/campaigns 的 payload。
-/// </summary>
 public sealed class QoderCampaign
 {
     public string CampaignId { get; set; } = "";
     public string CampaignKey { get; set; } = "";
 
-    /// <summary>CLAIM_BENEFIT / VIEW_DETAILS。</summary>
+    /// <summary>CLAIM_BENEFIT（领福利）/ VIEW_DETAILS（纯展示，点一下算已读）。</summary>
     public string ActionType { get; set; } = "";
 
     /// <summary>CLAIMABLE / CLAIMED / ...</summary>
@@ -24,31 +21,109 @@ public sealed class QoderCampaign
     /// <summary>福利数量，如 100（Credits）。</summary>
     public double? BenefitAmount { get; set; }
 
-    /// <summary>活动起止（Unix 秒）。</summary>
+    /// <summary>限定的模型系列，如 ALL_MODELS / QWEN_SERIES。null = 不限（上游没给）。</summary>
+    public string? ModelSeries { get; set; }
+
+    /// <summary>
+    /// 有效期模式：RELATIVE_DAYS（领取后 N 天）/ FIXED_END（固定到期日）。
+    /// 「领取后 30 天有效」这句话里的 30 就来自
+    /// <c>benefit.validity = {mode:"RELATIVE_DAYS", days:30}</c>，不是写死的文案。
+    /// </summary>
+    public string? ValidityMode { get; set; }
+    public int? ValidityDays { get; set; }
+
+    /// <summary>FIXED_END 模式下的到期时刻（UTC）。</summary>
+    public DateTimeOffset? FixedEnd { get; set; }
+
+    /// <summary>活动起止（Unix 秒）。「每天领」是 [当天 10:00, 次日 09:59] UTC+8。</summary>
     public long? StartAt { get; set; }
     public long? EndAt { get; set; }
 
-    /// <summary>是否为「领取福利」类活动（不管领没领）。UI 靠它决定显不显示按钮。</summary>
+    // --- placements[POPUP].content 的 i18n（zh / en 各一套，上游总是两套都给）---
+    public string? TitleZh { get; set; }
+    public string? TitleEn { get; set; }
+    public string? DescriptionZh { get; set; }
+    public string? DescriptionEn { get; set; }
+    public string? ButtonTextZh { get; set; }
+    public string? ButtonTextEn { get; set; }
+    public string? DetailUrlZh { get; set; }
+    public string? DetailUrlEn { get; set; }
+
+    /// <summary>是否为「领取福利」类活动。UI 靠它决定显不显示领取按钮。</summary>
     public bool IsBenefitClaim => ActionType.Equals("CLAIM_BENEFIT", StringComparison.OrdinalIgnoreCase);
 
-    public bool IsClaimable =>
-        IsBenefitClaim && ClaimStatus.Equals("CLAIMABLE", StringComparison.OrdinalIgnoreCase);
+    public bool IsViewDetails => ActionType.Equals("VIEW_DETAILS", StringComparison.OrdinalIgnoreCase);
 
-    public bool IsClaimed => ClaimStatus.Equals("CLAIMED", StringComparison.OrdinalIgnoreCase);
+    public CampaignState State =>
+        IsViewDetails || ClaimStatus.Equals("CLAIMABLE", StringComparison.OrdinalIgnoreCase)
+            ? CampaignState.Claimable
+            : ClaimStatus.Equals("CLAIMED", StringComparison.OrdinalIgnoreCase)
+                ? CampaignState.Claimed
+                : CampaignState.Ineligible;
+
+    public bool IsClaimable => State == CampaignState.Claimable;
+    public bool IsClaimed => State == CampaignState.Claimed;
+
+    public DateTimeOffset? StartAtUtc =>
+        StartAt is { } s ? DateTimeOffset.FromUnixTimeSeconds(s) : null;
+
+    public DateTimeOffset? EndAtUtc =>
+        EndAt is { } e ? DateTimeOffset.FromUnixTimeSeconds(e) : null;
+
+    /// <summary>活动窗口是否已过。过期后按钮置灰——不然点了必然被上游 409 打回。</summary>
+    public bool IsExpired(DateTimeOffset now) => EndAtUtc is { } end && now >= end;
+
+    public long? CountdownMs(DateTimeOffset now)
+    {
+        if (EndAtUtc is not { } end) return null;
+        long ms = (long)(end - now).TotalMilliseconds;
+        return ms > 0 && ms <= 24 * 3600 * 1000 ? ms : null;
+    }
+
+    /// <summary>倒计时文案 HH:MM:SS（不足 1 小时则 00:MM:SS），与活动页 Ge() 一致。</summary>
+    public static string FormatCountdown(long ms)
+    {
+        long s = Math.Max(0, ms / 1000);
+        return $"{s / 3600:00}:{s % 3600 / 60:00}:{s % 60:00}";
+    }
+
+    public string Title()
+    {
+        if (!string.IsNullOrWhiteSpace(TitleZh)) return TitleZh;
+        if (!string.IsNullOrWhiteSpace(TitleEn)) return TitleEn;
+        return CampaignKey;
+    }
+
+    public string Description() =>
+        !string.IsNullOrWhiteSpace(DescriptionZh) ? DescriptionZh : DescriptionEn ?? "";
+
+    /// <summary>按钮文案。上游的 buttonText 常常是空串，此时由 UI 兜底。</summary>
+    public string? ButtonText() =>
+        !string.IsNullOrWhiteSpace(ButtonTextZh) ? ButtonTextZh
+        : !string.IsNullOrWhiteSpace(ButtonTextEn) ? ButtonTextEn
+        : null;
+
+    public string? DetailUrl() =>
+        !string.IsNullOrWhiteSpace(DetailUrlZh) ? DetailUrlZh : DetailUrlEn;
+
+    /// <summary>「领取后 30 天有效」里的天数，给 UI 拼提示用。null = 上游没给有效期规则。</summary>
+    public string? ValidityHint() => ValidityMode switch
+    {
+        "RELATIVE_DAYS" when ValidityDays is { } d => $"领取后 {d} 天有效",
+        "FIXED_END" when FixedEnd is { } f => $"{f.ToLocalTime():yyyy-MM-dd HH:mm} 到期",
+        _ => null,
+    };
 }
 
-/// <summary>
-/// 账号 Credits 快照。
-///
-/// 数据来源是 openapi.qoder.sh 的四个接口，逆向自官方客户端（out/main/index.js）：
-/// - <c>/sash/api/v2/me/usage</c>                      余额（套餐内 / 资源包）
-/// - <c>/sash/api/v1/ai-conversations/credits-summary</c> 近一年消耗、日峰值
-/// - <c>/sash/api/v1/ai-conversations/seat-activity</c>   连续 / 最长 / 累计活跃天数
-/// - <c>/sash/api/v1/me/campaigns</c>                     每日福利活动是否可领取
-///
-/// 这四个接口与推理接口不同：**不需要 COSY 签名**，只要 <c>Authorization: Bearer &lt;jobToken&gt;</c>
-/// （客户端 Ky() 的构造）。所以直接复用账号已有的 JobToken 即可。
-/// </summary>
+/// <summary>活动展示态。取值规则见 <see cref="QoderCampaign.State"/>。</summary>
+public enum CampaignState
+{
+    Claimable,
+    Claimed,
+    Ineligible,
+}
+
+
 public sealed class QoderCreditsSnapshot
 {
     public string AccountId { get; set; } = "";
@@ -95,10 +170,6 @@ public sealed class QoderCreditsSnapshot
         AddOnTotal is { } t && AddOnUsed is { } u ? Math.Max(0, t - u) : null;
 }
 
-/// <summary>
-/// 拉取并缓存账号 Credits 信息。缓存是为了账号列表页——一屏十几个账号，
-/// 每次渲染都打四个接口会很慢，而且这些数据（活跃天数、近一年消耗）变化很慢。
-/// </summary>
 public sealed class QoderCreditsService
 {
     /// <summary>缓存存活时长。活跃天数/年消耗按天变，5 分钟足够新鲜。</summary>
@@ -121,7 +192,6 @@ public sealed class QoderCreditsService
         _log = log;
     }
 
-    /// <summary>取缓存（可能过期），供 UI 先渲染、再后台刷新。</summary>
     public QoderCreditsSnapshot? Peek(string accountId)
     {
         lock (_lock)
@@ -138,9 +208,6 @@ public sealed class QoderCreditsService
         }
     }
 
-    /// <summary>
-    /// 取快照。缓存新鲜且未强制刷新时直接返回缓存；同一账号的并发请求会合并成一次。
-    /// </summary>
     public Task<QoderCreditsSnapshot> GetAsync(string accountId, bool force = false, CancellationToken ct = default)
     {
         lock (_lock)
@@ -160,9 +227,7 @@ public sealed class QoderCreditsService
         }
     }
 
-    /// <summary>批量拉取，用于账号列表页。单个失败不影响其余。</summary>
-    public async Task<Dictionary<string, QoderCreditsSnapshot>> GetAllAsync(
-        IEnumerable<string> accountIds, bool force = false, CancellationToken ct = default)
+    public async Task<Dictionary<string, QoderCreditsSnapshot>> GetAllAsync(IEnumerable<string> accountIds, bool force = false, CancellationToken ct = default)
     {
         var ids = accountIds.Distinct(StringComparer.Ordinal).ToList();
         var tasks = ids.Select(id => GetAsync(id, force, ct)).ToList();
@@ -180,15 +245,6 @@ public sealed class QoderCreditsService
         }
     }
 
-    /// <summary>
-    /// 领取活动福利（「每天领 100 Credits」那个按钮）。
-    ///
-    /// 逆向自活动页 activity-iframe.js：<c>POST /sash/api/v1/me/campaigns/{campaignId}/claim</c>，
-    /// **没有请求体**。官方客户端靠 Electron 的 onBeforeSendHeaders 给 iframe 的 XHR 自动注入
-    /// 认证头，这里显式带上同样的头，所以不需要那个 iframe。
-    ///
-    /// 领取成功后强制重拉快照，让调用方立刻看到新余额和 claimStatus。
-    /// </summary>
     public async Task<QoderClaimResult> ClaimAsync(string accountId, string campaignId, CancellationToken ct = default)
     {
         var acc = _auth.Database.GetAccountById(accountId);
@@ -221,7 +277,16 @@ public sealed class QoderCreditsService
             {
                 _log.LogWarning("领取福利失败 account={Account} campaign={Campaign} HTTP {Status}: {Body}",
                     Short(accountId), campaignId, (int)resp.StatusCode, Truncate(body, 200));
-                return new QoderClaimResult(false, $"HTTP {(int)resp.StatusCode}：{Truncate(body, 200)}", null);
+                return new QoderClaimResult(false, DescribeClaimFailure((int)resp.StatusCode, body), null);
+            }
+
+            // 2xx 但没拿到 CLAIMED：上游把「今天已经领过了」之类的情形也归到 2xx，
+            // 不校验就会把没发钱的领取报成成功。
+            if (!ClaimsConfirmed(body))
+            {
+                _log.LogWarning("领取返回 2xx 但未见 CLAIMED account={Account} campaign={Campaign}: {Body}",
+                    Short(accountId), campaignId, Truncate(body, 200));
+                return new QoderClaimResult(false, "领取失败，请稍后重试（上游未确认到账）", null);
             }
 
             _log.LogInformation("已领取福利 account={Account} campaign={Campaign}", Short(accountId), campaignId);
@@ -234,6 +299,49 @@ public sealed class QoderCreditsService
             return new QoderClaimResult(false, ex.Message, null);
         }
     }
+
+    /// <summary>响应体里带 status:"CLAIMED"（顶层或 data 下）才算领成功。</summary>
+    private static bool ClaimsConfirmed(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                root = data;
+            }
+            return root.ValueKind == JsonValueKind.Object
+                && GetString(root, "status")?.Equals("CLAIMED", StringComparison.OrdinalIgnoreCase) == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string DescribeClaimFailure(int status, string body)
+    {
+        string? code = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            code = GetString(doc.RootElement, "errorCode");
+        }
+        catch { /* 错误体不是 JSON，按状态码兜底 */ }
+
+        string message = status switch
+        {
+            401 or 403 => "登录状态不可用，请关闭后重试",
+            409 => "活动已结束或当前账号不符合领取条件",
+            429 or 503 => "操作过于频繁，请稍后重试",
+            404 => "活动不存在或已结束",
+            _ => "领取失败，请稍后重试",
+        };
+        return code is null ? $"{message}（HTTP {status}）" : $"{message}（{code}）";
+    }
+
 
     private async Task<QoderCreditsSnapshot> FetchAsync(string accountId, CancellationToken ct)
     {
@@ -298,7 +406,6 @@ public sealed class QoderCreditsService
         return snap;
     }
 
-    /// <summary>GET 并解析 JSON。失败返回 null，不抛——调用方按「该数据源不可用」处理。</summary>
     private async Task<JsonDocument?> TryGetJsonAsync(QoderEndpoints endpoints, string path, string token, CancellationToken ct)
     {
         try
@@ -324,15 +431,13 @@ public sealed class QoderCreditsService
         }
     }
 
-    /// <summary>
-    /// 官方客户端 Ky() 的请求头：openapi.qoder.sh 上的接口只要 Bearer token，
-    /// 不像 api3.qoder.sh 的推理接口需要整套 COSY 签名。
-    /// </summary>
     private static void ApplyAuthHeaders(HttpRequestMessage req, string token)
     {
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        req.Headers.TryAddWithoutValidation("Cosy-ClientType", QoderConstants.ClientType);
+        // 必须用 OpenApiClientType(10)：带 5 的话 campaigns 接口会返回空列表，
+        // 「每天领 100 Credits」整张卡片都拿不到。详见 QoderConstants.OpenApiClientType。
+        req.Headers.TryAddWithoutValidation("Cosy-ClientType", QoderConstants.OpenApiClientType);
         req.Headers.TryAddWithoutValidation("User-Agent", "Qoder");
     }
 
@@ -366,8 +471,9 @@ public sealed class QoderCreditsService
 
     private static void ParseActivity(JsonDocument? doc, QoderCreditsSnapshot snap, List<string> failures)
     {
-        if (doc is null) { failures.Add("seat-activity"); return; }
-        // 注意：上游字段名与 UI 用的名字不同，客户端 nKe() 做了重命名，这里按**原始字段**读。
+        if (doc is null) {
+            failures.Add("seat-activity"); return;
+        }
         var root = doc.RootElement;
         snap.CurrentStreakDays = GetInt(root, "currentConsecutiveDays");
         snap.LongestStreakDays = GetInt(root, "maxConsecutiveDays");
@@ -401,13 +507,72 @@ public sealed class QoderCreditsService
                 };
                 if (e.TryGetProperty("benefit", out var b) && b.ValueKind == JsonValueKind.Object)
                 {
-                    camp.BenefitKind = GetString(b, "kind");
-                    camp.BenefitAmount = GetDouble(b, "amount");
+                    ParseBenefit(b, camp);
                 }
+                ParsePlacement(e, camp);
                 if (camp.CampaignId.Length > 0)
                 {
                     snap.Campaigns.Add(camp);
                 }
+            }
+        }
+    }
+
+    private static void ParseBenefit(JsonElement b, QoderCampaign camp)
+    {
+        camp.BenefitKind = GetString(b, "kind");
+        camp.BenefitAmount = GetDouble(b, "amount");
+
+        // benefit.modelScope.modelSeries.key —— 上游测试数据里见过 ALL_MODELS / QWEN_SERIES
+        if (b.TryGetProperty("modelScope", out var ms) && ms.ValueKind == JsonValueKind.Object
+            && ms.TryGetProperty("modelSeries", out var series) && series.ValueKind == JsonValueKind.Object)
+        {
+            camp.ModelSeries = GetString(series, "key");
+        }
+
+        // benefit.validity —— 「领取后 30 天有效」的 30 在这，不是文案写死的
+        if (b.TryGetProperty("validity", out var v) && v.ValueKind == JsonValueKind.Object)
+        {
+            camp.ValidityMode = GetString(v, "mode");
+            camp.ValidityDays = GetInt(v, "days");
+            if (GetString(v, "fixedEnd") is { } fixedEnd
+                && DateTimeOffset.TryParse(fixedEnd, out var parsed))
+            {
+                camp.FixedEnd = parsed;
+            }
+        }
+    }
+
+    private static void ParsePlacement(JsonElement e, QoderCampaign camp)
+    {
+        if (!e.TryGetProperty("placements", out var arr) || arr.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var want in new[] { "POPUP", "USAGE" })
+        {
+            foreach (var p in arr.EnumerateArray())
+            {
+                if (p.ValueKind != JsonValueKind.Object) continue;
+                if (!string.Equals(GetString(p, "type"), want, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!p.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Object) continue;
+
+                if (content.TryGetProperty("zh", out var zh) && zh.ValueKind == JsonValueKind.Object)
+                {
+                    camp.TitleZh = GetString(zh, "title");
+                    camp.DescriptionZh = GetString(zh, "description");
+                    camp.ButtonTextZh = GetString(zh, "buttonText");
+                    camp.DetailUrlZh = GetString(zh, "detailUrl");
+                }
+                if (content.TryGetProperty("en", out var en) && en.ValueKind == JsonValueKind.Object)
+                {
+                    camp.TitleEn = GetString(en, "title");
+                    camp.DescriptionEn = GetString(en, "description");
+                    camp.ButtonTextEn = GetString(en, "buttonText");
+                    camp.DetailUrlEn = GetString(en, "detailUrl");
+                }
+                return;
             }
         }
     }
@@ -429,5 +594,4 @@ public sealed class QoderCreditsService
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }
 
-/// <summary>一次领取的结果。成功时带上刷新过的快照，调用方不必再拉一次。</summary>
 public sealed record QoderClaimResult(bool Success, string? Error, QoderCreditsSnapshot? Snapshot);

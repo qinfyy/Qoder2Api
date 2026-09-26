@@ -201,30 +201,6 @@
                                         活跃 @activeDays 天 (连 @(cr.CurrentStreakDays ?? 0))
                                     </div>
                                 }
-                                @* 领取类活动一律显示按钮：可领取时是可点的，已领取时是灰色禁用态（与客户端一致） *@
-                                @foreach (var camp in cr.Campaigns.Where(c => c.IsBenefitClaim))
-                                {
-                                    <div style="margin-top: 0.15rem;">
-                                        @if (camp.IsClaimable)
-                                        {
-                                            <button type="button" class="btn primary"
-                                                    style="font-size: 0.68rem; padding: 0.1rem 0.4rem; white-space: nowrap;"
-                                                    disabled="@(claimingCampaignId == camp.CampaignId)"
-                                                    @onclick="() => ClaimCampaignAsync(acc.Id, camp.CampaignId)"
-                                                    title="@($"活动 {camp.CampaignKey}，领取后 30 天有效")">
-                                                @(claimingCampaignId == camp.CampaignId ? "领取中…" : $"🎁 领 {Fmt(camp.BenefitAmount)} Credits")
-                                            </button>
-                                        }
-                                        else if (camp.IsClaimed)
-                                        {
-                                            <button type="button" class="btn secondary" disabled
-                                                    style="font-size: 0.68rem; padding: 0.1rem 0.4rem; white-space: nowrap; opacity: 0.6; cursor: default;"
-                                                    title="今日已领取，每日 10:00（UTC+8）刷新">
-                                                已领取
-                                            </button>
-                                        }
-                                    </div>
-                                }
                                 @if (!string.IsNullOrEmpty(cr.Error))
                                 {
                                     <div style="font-size: 0.66rem; color: var(--warn);" title="@cr.Error">部分数据缺失</div>
@@ -304,6 +280,16 @@
                         </td>
                         <td>
                             <div class="row-actions">
+                                @* 活动按账号管：这个按钮只开这个账号的活动，别的号不受影响 *@
+                                @if (CampaignsOf(acc.Id) is { Count: > 0 } camps)
+                                {
+                                    var pending = PendingClaimCount(camps);
+                                    <button class="secondary" type="button"
+                                            title="@($"该账号的 Qoder 运营活动（{camps.Count} 项）")"
+                                            @onclick="() => OpenCampaignDialog(acc.Id)">
+                                        🎁 活动@(pending > 0 ? $"（{pending}）" : "")
+                                    </button>
+                                }
                                 @if (ps is not null && ps.State != PoolAccountState.Ready)
                                 {
                                     <button class="secondary" type="button"
@@ -331,6 +317,89 @@
         </table>
     </div>
 </section>
+
+<!-- Qoder 运营活动弹窗：所有账号的活动集中在一处，表格里只留一个入口按钮 -->
+@if (campaignAccount is { } campAcc)
+{
+    var (sub, idKind) = AccountSubtitle(campAcc);
+    var campList = CampaignsOf(campAcc.Id);
+    <div class="modal-overlay" role="dialog" aria-modal="true" @onclick="CloseCampaignDialog">
+        <div class="modal-window" style="max-width: 560px;" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>
+                    <span>🎁</span>
+                    <span>@idKind @sub</span>
+                </h2>
+                <button type="button" class="modal-close-btn" @onclick="CloseCampaignDialog" aria-label="关闭">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <p class="muted" style="margin: 0; font-size: 0.85rem;">
+                    活动权益以领取时的账户状态为准。
+                </p>
+                @if (campList.Count == 0)
+                {
+                    <p class="muted" style="margin: 0;">暂无可参与的活动。新活动上线后会在这里展示。</p>
+                }
+                @foreach (var camp in campList)
+                {
+                    var countdown = camp.CountdownMs(now);
+                    var expired = camp.IsExpired(now);
+                    <section style="border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem 0.85rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <span style="font-weight: 600; font-size: 0.92rem;">@camp.Title()</span>
+                            @if (countdown is { } cd)
+                            {
+                                <span style="font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums;"
+                                      title="@($"下次刷新：{camp.EndAtUtc:yyyy-MM-dd HH:mm}（本机时区）")">
+                                    ⏱ @QoderCampaign.FormatCountdown(cd)
+                                </span>
+                            }
+                        </div>
+                        @if (camp.Description() is { Length: > 0 } desc)
+                        {
+                            <div class="muted" style="font-size: 0.8rem; margin-top: 0.15rem;">@desc</div>
+                        }
+                        <div style="display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                            <button type="button"
+                                    class="@(camp.IsClaimable && !expired ? "primary" : "secondary")"
+                                    style="font-size: 0.8rem; padding: 0.25rem 0.8rem;"
+                                    disabled="@(!camp.IsClaimable || expired || claimingCampaignId == camp.CampaignId)"
+                                    @onclick="() => ClaimCampaignAsync(campAcc.Id, camp)"
+                                    title="@CampaignButtonTitle(camp)">
+                                @CampaignButtonLabel(camp)
+                            </button>
+                            @if (camp.BenefitKind == "CREDITS" && camp.BenefitAmount is { } amt)
+                            {
+                                <span style="font-weight: 600; color: var(--ok); font-size: 0.85rem;">
+                                    + @Fmt(amt) Credits
+                                    @if (camp.ModelSeries is { } series && series != "ALL_MODELS")
+                                    {
+                                        <span class="muted" style="font-weight: 400;">（限 @series）</span>
+                                    }
+                                </span>
+                            }
+                            @if (camp.DetailUrl() is { Length: > 0 } link)
+                            {
+                                <a href="@link" target="_blank" rel="noopener noreferrer"
+                                   style="font-size: 0.78rem;">活动详情 ↗</a>
+                            }
+                        </div>
+                    </section>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="secondary" disabled="@creditsLoading" @onclick="() => LoadCreditsAsync(force: true)">
+                    @(creditsLoading ? "刷新中…" : "刷新活动")
+                </button>
+                <button type="button" class="primary" @onclick="CloseCampaignDialog">关闭</button>
+            </div>
+        </div>
+    </div>
+}
 
 <!-- Add Account Wizard Dialog -->
 @if (isAddDialogOpen)
@@ -384,7 +453,7 @@
                             <span style="font-size: 1.5rem; line-height: 1;">⬇</span>
                             <div style="flex: 1;">
                                 <div style="font-weight: 600; color: var(--ink); margin-bottom: 0.2rem;">导入账号文件</div>
-                                <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">导入 cockpit-tools 导出的 <span class="mono">qoder_accounts_*.json</span>，凭证直给、无需再登录。</div>
+                                <div class="muted" style="font-size: 0.8rem; line-height: 1.4;">导入 Cockpit Tools 导出的 <span class="mono">qoder_accounts_*.json</span>，凭证直给、无需再登录。</div>
                             </div>
                         </button>
                     </div>
@@ -484,7 +553,7 @@
                         </div>
 
                         <p class="muted" style="font-size: 0.85rem; margin: 0;">
-                            选择 cockpit-tools 导出的 <span class="mono">json</span> 文件。
+                            选择 Cockpit Tools 导出的 <span class="mono">json</span> 文件。
                             文件里的凭证会被直接写入本地数据库，不会再与官方服务交互验证。
                         </p>
 
@@ -553,8 +622,6 @@
 
     private string SelectedRegionPatUrl => $"{QoderEndpoints.For(selectedRegion).WebBase}/account/integrations";
 
-    // 导入（cockpit-tools 导出文件）。区域复用向导第一步选的 selectedRegion，
-    // 不再单开一个选择器——同一个弹窗里选两遍区域只会让人怀疑它们不是一回事。
     private const long MaxImportBytes = 16 * 1024 * 1024; // 账号文件很小，16MB 足够且防手滑拖进巨型文件
     private string? importJson;
     private string? importFileName;
@@ -601,8 +668,6 @@
         importResult = null;
         try
         {
-            // 进程内直接调服务，与 PAT 流程一致——面板不需要绕一圈 HTTP。
-            // 区域取向导第一步的 selectedRegion。
             importResult = AuthService.ImportFromCockpitJson(importJson, selectedRegion);
             ReloadAccounts();
             ShowToast($"导入完成：新增 {importResult.Added}、更新 {importResult.Updated}、跳过 {importResult.Skipped}");
@@ -649,6 +714,8 @@
     {
         AuthService.OnAuthStateChanged -= HandleAuthChanged;
         CancelOAuth();
+        _campaignTicker?.Dispose();
+        _campaignTicker = null;
         _toastCts?.Cancel();
         _toastCts?.Dispose();
     }
@@ -675,8 +742,67 @@
     private Dictionary<string, QoderCreditsSnapshot> _creditsById = new(StringComparer.Ordinal);
     private bool creditsLoading;
 
+    /// <summary>
+    /// 卡片渲染用的「当前时间」。由每秒一次的 <see cref="_campaignTicker"/> 推进——
+    /// 直接用 DateTimeOffset.Now 的话倒计时那一行不会自己走，得整页重渲染才对。
+    /// </summary>
+    private DateTimeOffset now = DateTimeOffset.UtcNow;
+    private System.Timers.Timer? _campaignTicker;
+
     private QoderCreditsSnapshot? CreditsOf(string accountId) =>
         _creditsById.TryGetValue(accountId, out var s) ? s : null;
+
+    /// <summary>按钮文案。优先用上游的 buttonText，缺省时按状态自己说（措辞对齐活动页）。</summary>
+    private string CampaignButtonLabel(QoderCampaign camp)
+    {
+        if (claimingCampaignId == camp.CampaignId) return "领取中…";
+        if (camp.IsViewDetails) return camp.ButtonText() ?? "查看详情";
+        if (camp.IsClaimed) return camp.ButtonText() ?? "已领取";
+        if (!camp.IsClaimable) return "不可领取";
+        if (camp.IsExpired(now)) return "已结束";
+        return camp.ButtonText() ?? "领取";
+    }
+
+    private string CampaignButtonTitle(QoderCampaign camp)
+    {
+        var parts = new List<string> { $"活动 {camp.CampaignKey}" };
+        if (camp.BenefitKind == "CREDITS" && camp.BenefitAmount is { } amt)
+        {
+            parts.Add($"福利 {Fmt(amt)} Credits");
+        }
+        if (camp.ValidityHint() is { } validity) parts.Add(validity);
+        if (camp.StartAtUtc is { } start && camp.EndAtUtc is { } end)
+        {
+            parts.Add($"活动期 {start.ToLocalTime():MM-dd HH:mm} ~ {end.ToLocalTime():MM-dd HH:mm}");
+        }
+        return string.Join("；", parts);
+    }
+
+    /// <summary>
+    /// 只有弹窗开着、且真有倒计时在跑的时候才起秒表。倒计时只画在弹窗里，
+    /// 弹窗关着就没必要每秒重渲染。
+    /// </summary>
+    private void SyncCampaignTicker()
+    {
+        bool need = campaignAccount is not null
+            && CampaignsOf(campaignAccount.Id).Any(c => c.CountdownMs(now) is not null);
+
+        if (need && _campaignTicker is null)
+        {
+            _campaignTicker = new System.Timers.Timer(1000);
+            _campaignTicker.Elapsed += (_, _) => InvokeAsync(() =>
+            {
+                now = DateTimeOffset.UtcNow;
+                StateHasChanged();
+            });
+            _campaignTicker.Start();
+        }
+        else if (!need && _campaignTicker is not null)
+        {
+            _campaignTicker.Dispose();
+            _campaignTicker = null;
+        }
+    }
 
     private async Task LoadCreditsAsync(bool force = false)
     {
@@ -696,6 +822,7 @@
         finally
         {
             creditsLoading = false;
+            SyncCampaignTicker();
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -703,8 +830,41 @@
     /// <summary>正在领取的活动 id，用于禁用按钮防重复点击。</summary>
     private string? claimingCampaignId;
 
-    private async Task ClaimCampaignAsync(string accountId, string campaignId)
+    // --- 运营活动弹窗（一个账号一个弹窗，不合并）---
+    /// <summary>当前打开活动的账号。null = 弹窗没开。</summary>
+    private AccountRecord? campaignAccount;
+
+    /// <summary>
+    /// 某账号的活动。领福利类排前面：那是每天都要点一次的，纯展示的促销往后放。
+    /// 上游没下发活动时返回空列表，操作列就不显示按钮。
+    /// </summary>
+    private List<QoderCampaign> CampaignsOf(string accountId) =>
+        CreditsOf(accountId) is not { } cr || cr.Campaigns.Count == 0
+            ? []
+            : cr.Campaigns
+                .OrderByDescending(c => c.IsBenefitClaim)
+                .ThenBy(c => c.EndAt ?? long.MaxValue)
+                .ToList();
+
+    /// <summary>操作列按钮上的角标：这个账号还有几条能领。</summary>
+    private int PendingClaimCount(List<QoderCampaign> camps) =>
+        camps.Count(c => c.IsBenefitClaim && c.IsClaimable && !c.IsExpired(now));
+
+    private void OpenCampaignDialog(string accountId)
     {
+        campaignAccount = accounts.FirstOrDefault(a => a.Id == accountId);
+        SyncCampaignTicker();
+    }
+
+    private void CloseCampaignDialog()
+    {
+        campaignAccount = null;
+        SyncCampaignTicker();
+    }
+
+    private async Task ClaimCampaignAsync(string accountId, QoderCampaign campaign)
+    {
+        string campaignId = campaign.CampaignId;
         claimingCampaignId = campaignId;
         try
         {
@@ -712,16 +872,28 @@
             if (r.Success && r.Snapshot is not null)
             {
                 _creditsById[accountId] = r.Snapshot;
-                ShowToast("领取成功，Credits 已到账。");
+                // VIEW_DETAILS 点一下是「算已读 + 去看详情」，不是领钱。
+                // 官方活动页也是这个顺序：先 POST claim，再 window.open(detailUrl)。
+                if (campaign.IsViewDetails && campaign.DetailUrl() is { Length: > 0 } url)
+                {
+                    // 弹不出新标签页也不算领取失败：已读状态已经写回去了。
+                    try { await JS.InvokeVoidAsync("qoderHelper.openInNewTab", url); }
+                    catch { /* 忽略 */ }
+                    ShowToast("已标记为已读。");
+                }
+                else
+                {
+                    ShowToast("领取成功，Credits 已到账。");
+                }
             }
             else
             {
-                ShowToast($"领取失败：{r.Error ?? "未知原因"}", isError: true);
+                ShowToast($"操作失败：{r.Error ?? "未知原因"}", isError: true);
             }
         }
         catch (Exception ex)
         {
-            ShowToast($"领取失败：{ex.Message}", isError: true);
+            ShowToast($"操作失败：{ex.Message}", isError: true);
         }
         finally
         {
@@ -736,13 +908,8 @@
         : d == Math.Floor(d) ? d.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
         : d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
-    private PoolAccountStatus? PoolStatusOf(string accountId) =>
-        _statusById.TryGetValue(accountId, out var s) ? s : null;
+    private PoolAccountStatus? PoolStatusOf(string accountId) => _statusById.TryGetValue(accountId, out var s) ? s : null;
 
-    /// <summary>
-    /// 账号副标题：**邮箱 → 手机号**。国内版账号多为手机号注册、没有邮箱，用手机号兜底。
-    /// 手机号取自 /api/v1/userinfo 的 security_mobile（见 QoderAuthService）。
-    /// </summary>
     private static (string Text, string Title) AccountSubtitle(AccountRecord acc)
     {
         if (!string.IsNullOrWhiteSpace(acc.UserEmail))
@@ -756,7 +923,6 @@
         return ("—", "无邮箱");
     }
 
-    /// <summary>认证方式徽标。import = 从 cockpit-tools 导出的文件导入（直给 jobToken）。</summary>
     private static string AuthMethodLabel(AccountRecord acc) => acc.AuthMethod switch
     {
         "pat" => "PAT",
@@ -767,7 +933,7 @@
     private static string AuthMethodTitle(AccountRecord acc) => acc.AuthMethod switch
     {
         "pat" => "个人访问令牌登录",
-        "import" => "从 cockpit-tools 导出的文件导入，凭证直给、无自动续期",
+        "import" => "从 Cockpit Tools 导出的文件导入，凭证直给、无自动续期",
         _ => "浏览器 OAuth 设备流登录",
     };
 

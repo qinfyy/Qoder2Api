@@ -20,6 +20,20 @@ public static class QoderConstants
 
     public const string IDEVersion = "1.0.0";
     public const string ClientType = "5";
+
+    /// <summary>
+    /// openapi 域（<c>/sash/api/**</c>：余额、活跃天数、活动福利）专用的 ClientType。
+    ///
+    /// **和推理接口的 <see cref="ClientType"/> 不是同一个值，别混用。**
+    /// 官方客户端发 campaigns 请求时带的是 10（日志里 <c>[Campaign] 活动状态请求发出
+    /// {..., clientType:10}</c>）。实测同一个 token：
+    /// <list type="bullet">
+    /// <item><c>Cosy-ClientType: 5</c> → <c>showCampaign:false, campaigns:[]</c>（活动被隐藏）</item>
+    /// <item><c>Cosy-ClientType: 10</c> → 正常返回当天的「每天领 100 Credits」</item>
+    /// </list>
+    /// 其余三个 sash 接口两种值结果相同，但既然客户端用 10，就统一用 10。
+    /// </summary>
+    public const string OpenApiClientType = "10";
     public const string DataPolicy = "disagree";
     public const string LoginVersion = "v2";
     public const string MachineOS = "x86_64_windows";
