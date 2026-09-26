@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["Qoder2Api.styles.css"]" />
     <link rel="stylesheet" href="app.css" />
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
@@ -15,8 +17,8 @@
 <body>
     <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
-    <script src="qoder.js"></script>
     <script src="_framework/blazor.web.js"></script>
+    <script src="index.js"></script>
 </body>
 
 </html>
