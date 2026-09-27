@@ -14,8 +14,6 @@ public class DeviceFlowState
     public string Verifier { get; set; } = "";
     public string MachineId { get; set; } = "";
     public string VerificationUrl { get; set; } = "";
-
-    /// <summary>本次登录针对的区域。轮询与落库都按它走（国际版 / 国内版域名不同）。</summary>
     public QoderRegion Region { get; set; } = QoderRegion.Global;
 }
 
@@ -65,6 +63,37 @@ public class QoderAuthService
         }
     }
 
+    private DeviceFingerprint FingerprintOf(AccountRecord acc)
+    {
+        if (!string.IsNullOrEmpty(acc.MachineId) && !string.IsNullOrEmpty(acc.MachineToken) && !string.IsNullOrEmpty(acc.MachineType) && !string.IsNullOrEmpty(acc.MachineCode))
+        {
+            return new DeviceFingerprint
+            {
+                MachineId = acc.MachineId,
+                MachineToken = acc.MachineToken,
+                MachineType = acc.MachineType,
+                MachineCode = acc.MachineCode,
+            };
+        }
+
+        var fp = DeviceFingerprintFactory.Create();
+
+        acc.MachineId ??= fp.MachineId;
+        acc.MachineToken ??= fp.MachineToken;
+        acc.MachineType ??= fp.MachineType;
+        acc.MachineCode ??= fp.MachineCode;
+        _db.UpsertAccount(acc);
+        _log.LogInformation("已为账号 {Account} 分配设备指纹 machineId={MachineId}", acc.UserName ?? acc.Id, acc.MachineId);
+
+        return new DeviceFingerprint
+        {
+            MachineId = acc.MachineId,
+            MachineToken = acc.MachineToken,
+            MachineType = acc.MachineType,
+            MachineCode = acc.MachineCode,
+        };
+    }
+
     public bool RequireApiKey
     {
         get => _db.GetSetting("require_api_key") == "true";
@@ -95,7 +124,7 @@ public class QoderAuthService
             .Replace('/', '_');
 
         string nonce = Guid.NewGuid().ToString();
-        string machineId = MachineId;
+        string machineId = DeviceFingerprintFactory.CreateMachineId();
 
         string url = $"{ep.DeviceLoginUrl}?challenge={challenge}&challenge_method=S256&machine_id={machineId}&nonce={nonce}";
 
@@ -182,6 +211,15 @@ public class QoderAuthService
         }
         catch { }
 
+        var fresh = DeviceFingerprintFactory.Create();
+        var fp = new DeviceFingerprint
+        {
+            MachineId = state.MachineId,
+            MachineToken = fresh.MachineToken,
+            MachineType = fresh.MachineType,
+            MachineCode = fresh.MachineCode,
+        };
+
         var acc = new AccountRecord
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -199,8 +237,10 @@ public class QoderAuthService
             Status = "active",
             Quota = quota,
             IsQuotaExceeded = exceeded,
-            // 仅首个账号自动成为首选（号池模式下所有 active 账号都参与选号，
-            // 见 ConnectPatAsync 的同款说明）。
+            MachineId = fp.MachineId,
+            MachineToken = fp.MachineToken,
+            MachineType = fp.MachineType,
+            MachineCode = fp.MachineCode,
             IsDefault = !_db.GetAllAccounts().Any(a => a.IsDefault),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -259,8 +299,6 @@ public class QoderAuthService
         double quota = sroot.TryGetProperty("quota", out var qp) ? qp.GetDouble() : 0;
         bool exceeded = sroot.TryGetProperty("isQuotaExceeded", out var exp2) && exp2.GetBoolean();
 
-        // 手机号只在 /api/v1/userinfo 里（user/status 不返回），单独取一次。
-        // 失败不影响登录：国内版靠它兜底显示，国际版本来也没有这个字段。
         string? phone = null;
         try
         {
@@ -308,11 +346,18 @@ public class QoderAuthService
         acc.IsQuotaExceeded = exceeded;
         acc.UpdatedAt = DateTime.UtcNow;
 
+        if (string.IsNullOrEmpty(acc.MachineId))
+        {
+            var fp = DeviceFingerprintFactory.Create();
+            acc.MachineId = fp.MachineId;
+            acc.MachineToken = fp.MachineToken;
+            acc.MachineType = fp.MachineType;
+            acc.MachineCode = fp.MachineCode;
+        }
+
         if (isNew)
         {
             acc.CreatedAt = DateTime.UtcNow;
-            // 首个账号才自动成为首选。号池模式下所有 active 账号都参与选号，
-            // 「每加一个号就抢走默认标记」只会让 UI 的"当前活跃"来回跳。
             acc.IsDefault = !_db.GetAllAccounts().Any(a => a.IsDefault);
         }
 
@@ -428,9 +473,6 @@ public class QoderAuthService
             throw new InvalidOperationException($"账号 {acc.UserName ?? acc.Id} 缺少有效凭证。");
         }
 
-        // PAT 临近过期（10 分钟内）→ 续期。
-        // 设备流账号没有续期手段（凭证 30 天过期且上游无 refresh 端点），
-        // 过期后由号池的 NeedsRelogin 终态接管，不在这里反复尝试。
         if (acc.ExpiresAt.HasValue && acc.ExpiresAt.Value <= DateTimeOffset.UtcNow.AddMinutes(10))
         {
             if (acc.AuthMethod == "pat" && !string.IsNullOrEmpty(acc.PatToken))
@@ -454,14 +496,17 @@ public class QoderAuthService
             }
         }
 
+        var fp = FingerprintOf(acc);
         return new CosyCreds(
             UserID: acc.UserId!,
             AuthToken: acc.JobToken!,
             Name: acc.UserName,
             Email: acc.UserEmail,
-            MachineID: MachineId,
-            // 区域随凭证一起传递：聊天 / 模型目录 / 排队三处都从 creds.Endpoints 取域名。
-            Region: QoderEndpoints.ParseRegion(acc.Region)
+            MachineID: fp.MachineId,
+            Region: QoderEndpoints.ParseRegion(acc.Region),
+            MachineToken: fp.MachineToken,
+            MachineType: fp.MachineType,
+            MachineCode: fp.MachineCode
         );
     }
 

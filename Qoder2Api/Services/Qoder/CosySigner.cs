@@ -10,11 +10,16 @@ public record CosyCreds(
     string? Name = null,
     string? Email = null,
     string? MachineID = null,
-    QoderRegion Region = QoderRegion.Global
+    QoderRegion Region = QoderRegion.Global,
+    string? MachineToken = null,
+    string? MachineType = null,
+    string? MachineCode = null
 )
 {
     /// <summary>本凭证所属区域的端点档案。聊天 / 模型目录 / 排队三处都从这里取 URL。</summary>
     public QoderEndpoints Endpoints { get; } = QoderEndpoints.For(Region);
+    public string EffectiveMachineToken =>
+        string.IsNullOrWhiteSpace(MachineToken) ? MachineID ?? "" : MachineToken;
 }
 
 public static class CosySigner
@@ -92,7 +97,7 @@ public static class CosySigner
         string bodyHash = Convert.ToHexStringLower(MD5.HashData(body));
         string bodyLength = body.Length.ToString();
 
-        return new Dictionary<string, string>
+        var headers = new Dictionary<string, string>
         {
             ["Authorization"] = $"Bearer COSY.{payloadB64}.{sig}",
             ["Cosy-Key"] = cosyKey,
@@ -100,8 +105,7 @@ public static class CosySigner
             ["Cosy-Date"] = timestamp,
             ["Cosy-Version"] = QoderConstants.IDEVersion,
             ["Cosy-Machineid"] = machineId,
-            ["Cosy-Machinetoken"] = machineId,
-            ["Cosy-Machinetype"] = QoderConstants.MachineType,
+            ["Cosy-Machinetoken"] = creds.EffectiveMachineToken,
             ["Cosy-Machineos"] = QoderConstants.MachineOS,
             ["Cosy-Clienttype"] = QoderConstants.ClientType,
             ["Cosy-Clientip"] = "127.0.0.1",
@@ -114,5 +118,16 @@ public static class CosySigner
             ["Login-Version"] = QoderConstants.LoginVersion,
             ["X-Request-Id"] = Guid.NewGuid().ToString()
         };
+
+        if (!string.IsNullOrWhiteSpace(creds.MachineType))
+        {
+            headers["Cosy-Machinetype"] = creds.MachineType;
+        }
+        if (!string.IsNullOrWhiteSpace(creds.MachineCode))
+        {
+            headers["Cosy-Machinecode"] = creds.MachineCode;
+        }
+
+        return headers;
     }
 }

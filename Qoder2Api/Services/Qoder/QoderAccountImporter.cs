@@ -85,6 +85,12 @@ public static class QoderAccountImporter
             UpdatedAt = DateTime.UtcNow,
         };
 
+        var fp = DeviceFingerprintFactory.Create();
+        acc.MachineId = fp.MachineId;
+        acc.MachineToken = fp.MachineToken;
+        acc.MachineType = fp.MachineType;
+        acc.MachineCode = fp.MachineCode;
+
         if (hasInfo && LongOf(info, "expireTime") is long ms && ms > 0)
         {
             acc.ExpiresAt = DateTimeOffset.FromUnixTimeMilliseconds(ms);

@@ -13,11 +13,9 @@
   </ItemGroup>
 
   <ItemGroup>
+	<Content Include="appsettings.xml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="appsettings.*.xml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="models.xml" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Configuration\" />
   </ItemGroup>
 
 </Project>

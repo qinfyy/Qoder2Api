@@ -163,6 +163,13 @@ public class AppDbContext : DbContext
                             CreatedAt = DateTime.UtcNow,
                             UpdatedAt = DateTime.UtcNow
                         };
+                        // 迁移过来的账号同样分配独立指纹，
+                        // 与后续 OAuth / PAT / 导入路径保持一致的语义。
+                        var fp = DeviceFingerprintFactory.Create();
+                        acc.MachineId = fp.MachineId;
+                        acc.MachineToken = fp.MachineToken;
+                        acc.MachineType = fp.MachineType;
+                        acc.MachineCode = fp.MachineCode;
                         db.Accounts.Add(acc);
                         db.SaveChanges();
 
@@ -187,6 +194,40 @@ public class AppDbContext : DbContext
                     log?.LogWarning(ex, "迁移遗留 qoder_auth_config.json 时出错，已跳过");
                 }
             }
+        }
+
+        // 一号一码：给所有存量账号补齐缺失的指纹字段。
+        // 惰性回填要等到该账号第一次发请求才触发，冷账号会一直是空值；
+        // 启动时一次性补齐，让所有账号立即拥有一套稳定且互不相同的指纹。
+        try
+        {
+            var needFingerprint = db.Accounts
+                .Where(a => string.IsNullOrEmpty(a.MachineId)
+                         || string.IsNullOrEmpty(a.MachineToken)
+                         || string.IsNullOrEmpty(a.MachineType)
+                         || string.IsNullOrEmpty(a.MachineCode))
+                .ToList();
+
+            foreach (var acc in needFingerprint)
+            {
+                var fp = DeviceFingerprintFactory.Create();
+
+                acc.MachineId ??= fp.MachineId;
+                acc.MachineToken ??= fp.MachineToken;
+                acc.MachineType ??= fp.MachineType;
+                acc.MachineCode ??= fp.MachineCode;
+            }
+
+            if (needFingerprint.Count > 0)
+            {
+                db.SaveChanges();
+                log?.LogInformation("启动回填：已为 {Count} 个存量账号补齐设备指纹（一号一码）",
+                    needFingerprint.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            log?.LogWarning(ex, "回填存量账号设备指纹时出错，已跳过");
         }
     }
 }

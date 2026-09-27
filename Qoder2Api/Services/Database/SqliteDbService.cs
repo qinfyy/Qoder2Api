@@ -16,7 +16,6 @@ public class SqliteDbService
         AppDbContext.InitializeDatabase(db, log);
     }
 
-
     public List<AccountRecord> GetAllAccounts()
     {
         using var db = _factory.CreateDbContext();
@@ -68,6 +67,13 @@ public class SqliteDbService
             existing.IsDefault = acc.IsDefault;
             existing.UpdatedAt = DateTime.UtcNow;
             existing.LastUsedAt = acc.LastUsedAt;
+            // 设备指纹只在首次分配，续期/刷新凭证时**保留原值**——
+            // 官方把 machineId 变更当作 MACHINE_ID_CHANGED 错误处理，
+            // 说明上游认这个值；中途漂移反而会暴露异常。
+            existing.MachineId = acc.MachineId ?? existing.MachineId;
+            existing.MachineToken = acc.MachineToken ?? existing.MachineToken;
+            existing.MachineType = acc.MachineType ?? existing.MachineType;
+            existing.MachineCode = acc.MachineCode ?? existing.MachineCode;
         }
         else
         {
