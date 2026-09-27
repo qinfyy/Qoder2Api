@@ -25,7 +25,7 @@
 
 **模型目录**（`models.xml`）
 - 人工维护 `displayName` / 描述；上游目录提供倍率、是否免费、错峰折扣
-- 后台每 2 分钟同步，**只刷新已有模型不新增**
+- 后台每 2 分钟同步
 - 管理员手动同步时才会新增缺失模型，用于首次生成
 
 **Credits 与活动**
@@ -85,7 +85,7 @@ Development 环境下由 `launchSettings.json` 决定（`dotnet run` 走 5166）
   实测官方客户端发的就是厂商官方名（如 `Qwen3.8-Flash`），所以这里用官方名；
   无官方名的档位模型（`auto` / `ultimate` / …）用上游 key
 - 匹配规则见 `QoderConstants.ResolveModel`：`key` / `displayName` / `alias` 精确命中（大小写不敏感），
-  命中不到直接 404，**不做任何猜测性兜底**
+  命中不到直接 404。
 - `priceFactor` / `isFree` / `promotionLabel` 由上游同步写入，手工改会被下次同步覆盖
 
 ---
