@@ -159,7 +159,7 @@
                         </td>
                         <td class="mono" style="font-size: 0.8rem;"
                             title="@(r.FirstTokenMs > 0 ? "含排队等待与换号重试" : "本次没有可用的首字延迟：请求在产出内容前就失败或被取消")">
-                            @(r.FirstTokenMs > 0 ? $"{r.FirstTokenMs:N0} ms" : "—")
+                            @(r.FirstTokenMs > 0 ? $"{r.FirstTokenMs} ms" : "—")
                         </td>
                         <td class="mono">@(r.LatencyMs) ms</td>
                         <td class="supplier-cell" title="@SupplierTitle(r.AccountUid)">

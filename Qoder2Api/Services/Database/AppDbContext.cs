@@ -82,27 +82,27 @@ public class AppDbContext : DbContext
             entity.Property(e => e.DisabledReason).HasColumnName("disabled_reason");
             entity.Property(e => e.NeedsRelogin).HasColumnName("needs_relogin");
             entity.Property(e => e.NeedsReloginReason).HasColumnName("needs_relogin_reason");
-            entity.Property(e => e.CoolUntilMs).HasColumnName("cool_until_ms");
+            entity.Property(e => e.CoolUntil).HasColumnName("cool_until");
             entity.Property(e => e.CoolKind).HasColumnName("cool_kind");
             entity.Property(e => e.CoolReason).HasColumnName("cool_reason");
-            entity.Property(e => e.BreakerUntilMs).HasColumnName("breaker_until_ms");
+            entity.Property(e => e.BreakerUntil).HasColumnName("breaker_until");
             entity.Property(e => e.BreakerFails).HasColumnName("breaker_fails");
             entity.Property(e => e.BreakerRetryCount).HasColumnName("breaker_retry_count");
-            entity.Property(e => e.DegradeUntilMs).HasColumnName("degrade_until_ms");
+            entity.Property(e => e.DegradeUntil).HasColumnName("degrade_until");
             entity.Property(e => e.ConsecutiveFails).HasColumnName("consecutive_fails");
             entity.Property(e => e.SoftStreak).HasColumnName("soft_streak");
             entity.Property(e => e.SessionDeadFails).HasColumnName("session_dead_fails");
             entity.Property(e => e.SuccessCount).HasColumnName("success_count");
             entity.Property(e => e.ErrTotal).HasColumnName("err_total");
             entity.Property(e => e.SuccessEma).HasColumnName("success_ema");
-            entity.Property(e => e.LastSuccessMs).HasColumnName("last_success_ms");
-            entity.Property(e => e.LastErrMs).HasColumnName("last_err_ms");
+            entity.Property(e => e.LastSuccessAt).HasColumnName("last_success_at");
+            entity.Property(e => e.LastErrorAt).HasColumnName("last_error_at");
             entity.Property(e => e.ModelCooldownsJson).HasColumnName("model_cooldowns_json");
-            entity.Property(e => e.UpdatedAtMs).HasColumnName("updated_at_ms");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
         });
     }
 
-    public static void InitializeDatabase(AppDbContext db, ILogger? log = null)
+    public static void InitializeDatabase(AppDbContext db, Time time, ILogger? log = null)
     {
         string saveDir = Path.Combine(Directory.GetCurrentDirectory(), "save");
         if (!Directory.Exists(saveDir))
@@ -160,8 +160,8 @@ public class AppDbContext : DbContext
                             PatToken = pat,
                             Status = "active",
                             IsDefault = true,
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow
+                            CreatedAt = time.NowLocal,
+                            UpdatedAt = time.NowLocal
                         };
                         // 迁移过来的账号同样分配独立指纹，
                         // 与后续 OAuth / PAT / 导入路径保持一致的语义。
@@ -182,7 +182,7 @@ public class AppDbContext : DbContext
                                 KeyValue = localKey,
                                 KeyPrefix = localKey.Length >= 8 ? localKey[..8] + "..." : localKey,
                                 Status = "active",
-                                CreatedAt = DateTime.UtcNow
+                                CreatedAt = time.NowLocal
                             };
                             db.ApiKeys.Add(key);
                             db.SaveChanges();
@@ -196,9 +196,6 @@ public class AppDbContext : DbContext
             }
         }
 
-        // 一号一码：给所有存量账号补齐缺失的指纹字段。
-        // 惰性回填要等到该账号第一次发请求才触发，冷账号会一直是空值；
-        // 启动时一次性补齐，让所有账号立即拥有一套稳定且互不相同的指纹。
         try
         {
             var needFingerprint = db.Accounts

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Qoder2Api.Components;
 using Qoder2Api.Configuration;
 using Qoder2Api.Endpoints;
+using Qoder2Api.Services;
 using Qoder2Api.Services.Database;
 using Qoder2Api.Services.Qoder;
 
@@ -60,6 +61,8 @@ builder.Services.AddSingleton<QoderModelCatalog>();
 builder.Services.Configure<RefreshIntervalOptions>(builder.Configuration.GetSection(RefreshIntervalOptions.SectionName));
 builder.Services.AddSingleton<ModelCatalogRefresher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ModelCatalogRefresher>());
+builder.Services.Configure<TimeOptions>(builder.Configuration.GetSection(TimeOptions.SectionName));
+builder.Services.AddSingleton<Time>();
 
 builder.Services.Configure<PoolOptions>(builder.Configuration.GetSection(PoolOptions.SectionName));
 builder.Services.AddSingleton<QoderPool>();
@@ -78,6 +81,11 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// 显式解析：Time 是懒加载单例，主动在这里碰一下，
+// 保证时区解析和系统时间自检的日志一定出现在启动阶段，
+// 而不是等到第一个请求进来才打。
+_ = app.Services.GetRequiredService<Time>();
 
 QoderConstants.ReloadModels(
     app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(QoderConstants)));

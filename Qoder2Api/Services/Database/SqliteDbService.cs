@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Qoder2Api.Models;
+using Qoder2Api.Services;
 using Qoder2Api.Services.Qoder;
 
 namespace Qoder2Api.Services.Database;
@@ -8,12 +9,17 @@ namespace Qoder2Api.Services.Database;
 public class SqliteDbService
 {
     private readonly IDbContextFactory<AppDbContext> _factory;
+    private readonly Time _time;
 
-    public SqliteDbService(IDbContextFactory<AppDbContext> factory, ILogger<SqliteDbService> log)
+    public SqliteDbService(
+        IDbContextFactory<AppDbContext> factory,
+        Time time,
+        ILogger<SqliteDbService> log)
     {
         _factory = factory;
+        _time = time;
         using var db = _factory.CreateDbContext();
-        AppDbContext.InitializeDatabase(db, log);
+        AppDbContext.InitializeDatabase(db, time, log);
     }
 
     public List<AccountRecord> GetAllAccounts()
@@ -65,11 +71,8 @@ public class SqliteDbService
             existing.Quota = acc.Quota;
             existing.IsQuotaExceeded = acc.IsQuotaExceeded;
             existing.IsDefault = acc.IsDefault;
-            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedAt = _time.NowLocal;
             existing.LastUsedAt = acc.LastUsedAt;
-            // 设备指纹只在首次分配，续期/刷新凭证时**保留原值**——
-            // 官方把 machineId 变更当作 MACHINE_ID_CHANGED 错误处理，
-            // 说明上游认这个值；中途漂移反而会暴露异常。
             existing.MachineId = acc.MachineId ?? existing.MachineId;
             existing.MachineToken = acc.MachineToken ?? existing.MachineToken;
             existing.MachineType = acc.MachineType ?? existing.MachineType;
@@ -77,8 +80,8 @@ public class SqliteDbService
         }
         else
         {
-            acc.CreatedAt = DateTime.UtcNow;
-            acc.UpdatedAt = DateTime.UtcNow;
+            acc.CreatedAt = _time.NowLocal;
+            acc.UpdatedAt = _time.NowLocal;
             db.Accounts.Add(acc);
         }
         db.SaveChanges();
@@ -110,7 +113,7 @@ public class SqliteDbService
         if (acc != null)
         {
             acc.Status = acc.Status == "active" ? "disabled" : "active";
-            acc.UpdatedAt = DateTime.UtcNow;
+            acc.UpdatedAt = _time.NowLocal;
             db.SaveChanges();
         }
     }
@@ -132,7 +135,7 @@ public class SqliteDbService
         var acc = db.Accounts.FirstOrDefault(a => a.Id == accountId);
         if (acc != null)
         {
-            acc.LastUsedAt = DateTime.UtcNow;
+            acc.LastUsedAt = _time.NowLocal;
             db.SaveChanges();
         }
     }
@@ -152,7 +155,7 @@ public class SqliteDbService
         var key = db.ApiKeys.FirstOrDefault(k => k.KeyValue == keyValue.Trim() && k.Status == "active");
         if (key != null)
         {
-            key.LastUsedAt = DateTime.UtcNow;
+            key.LastUsedAt = _time.NowLocal;
             db.SaveChanges();
             return true;
         }
@@ -169,7 +172,7 @@ public class SqliteDbService
         }
         if (touch)
         {
-            key.LastUsedAt = DateTime.UtcNow;
+            key.LastUsedAt = _time.NowLocal;
             db.SaveChanges();
         }
         // 分离出上下文，避免调用方误用被跟踪的实体。
@@ -212,7 +215,7 @@ public class SqliteDbService
             KeyPrefix = prefix,
             AccountId = string.IsNullOrWhiteSpace(accountId) ? null : accountId,
             Status = "active",
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = _time.NowLocal
         });
         db.SaveChanges();
     }
@@ -243,6 +246,7 @@ public class SqliteDbService
     public void LogUsage(UsageRecord u)
     {
         using var db = _factory.CreateDbContext();
+        u.CreatedAt = _time.NowLocal;
         db.UsageRecords.Add(u);
         db.SaveChanges();
     }

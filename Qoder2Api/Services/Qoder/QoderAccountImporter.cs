@@ -20,7 +20,7 @@ public static class QoderAccountImporter
         public int Total => Added + Updated + Skipped;
     }
 
-    public static List<AccountRecord> Parse(string json, QoderRegion region)
+    public static List<AccountRecord> Parse(string json, QoderRegion region, Time time)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -38,13 +38,13 @@ public static class QoderAccountImporter
         foreach (var item in array.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object) continue;
-            var acc = ParseOne(item, region);
+            var acc = ParseOne(item, region, time);
             if (acc is not null) result.Add(acc);
         }
         return result;
     }
 
-    private static AccountRecord? ParseOne(JsonElement item, QoderRegion region)
+    private static AccountRecord? ParseOne(JsonElement item, QoderRegion region, Time time)
     {
         // 原样保存的官方客户端用户信息，是唯一可靠的凭证来源。
         JsonElement info = default;
@@ -81,8 +81,6 @@ public static class QoderAccountImporter
             DeviceToken = null,
             RefreshToken = hasInfo ? Str(info, "refreshToken") : null,
             Status = "active",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
         };
 
         var fp = DeviceFingerprintFactory.Create();
@@ -93,7 +91,7 @@ public static class QoderAccountImporter
 
         if (hasInfo && LongOf(info, "expireTime") is long ms && ms > 0)
         {
-            acc.ExpiresAt = DateTimeOffset.FromUnixTimeMilliseconds(ms);
+            acc.ExpiresAt = time.NowLocalAt(DateTimeOffset.FromUnixTimeMilliseconds(ms));
         }
 
         acc.PlanName = PlanOf(item, info);

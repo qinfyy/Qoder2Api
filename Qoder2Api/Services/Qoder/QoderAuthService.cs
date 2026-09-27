@@ -21,15 +21,21 @@ public class QoderAuthService
 {
     private readonly IHttpClientFactory _httpFactory;
     private readonly SqliteDbService _db;
+    private readonly Time _time;
     private readonly ILogger<QoderAuthService> _log;
     private readonly Lock _lock = new();
 
     public event Action? OnAuthStateChanged;
 
-    public QoderAuthService(IHttpClientFactory httpFactory, SqliteDbService db, ILogger<QoderAuthService> log)
+    public QoderAuthService(
+        IHttpClientFactory httpFactory,
+        SqliteDbService db,
+        Time time,
+        ILogger<QoderAuthService> log)
     {
         _httpFactory = httpFactory;
         _db = db;
+        _time = time;
         _log = log;
     }
     private HttpClient Http => _httpFactory.CreateClient(QoderHttp.ClientName);
@@ -167,7 +173,7 @@ public class QoderAuthService
         string? refreshToken = root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
 
         string activeJobToken = deviceToken;
-        DateTimeOffset expiresAt = DateTimeOffset.UtcNow.AddDays(30);
+        DateTime expiresAt = _time.NowLocal.AddDays(30);
 
         // Fetch User Info
         string? name = null;
@@ -242,8 +248,8 @@ public class QoderAuthService
             MachineType = fp.MachineType,
             MachineCode = fp.MachineCode,
             IsDefault = !_db.GetAllAccounts().Any(a => a.IsDefault),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            CreatedAt = _time.NowLocal,
+            UpdatedAt = _time.NowLocal
         };
 
         _db.UpsertAccount(acc);
@@ -344,7 +350,7 @@ public class QoderAuthService
         acc.Status = "active";
         acc.Quota = quota;
         acc.IsQuotaExceeded = exceeded;
-        acc.UpdatedAt = DateTime.UtcNow;
+        acc.UpdatedAt = _time.NowLocal;
 
         if (string.IsNullOrEmpty(acc.MachineId))
         {
@@ -357,7 +363,7 @@ public class QoderAuthService
 
         if (isNew)
         {
-            acc.CreatedAt = DateTime.UtcNow;
+            acc.CreatedAt = _time.NowLocal;
             acc.IsDefault = !_db.GetAllAccounts().Any(a => a.IsDefault);
         }
 
@@ -390,7 +396,7 @@ public class QoderAuthService
     private static string NonEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? QoderConstants.UnknownPlan : value;
 
-    private static (string jobToken, DateTimeOffset expiresAt) ParseJobTokenResponse(string body)
+    private (string jobToken, DateTime expiresAt) ParseJobTokenResponse(string body)
     {
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
@@ -411,12 +417,13 @@ public class QoderAuthService
         if (root.TryGetProperty("expires_in", out var exp)) expiresInMs = exp.GetInt64();
         else if (root.TryGetProperty("data", out var dp2) && dp2.TryGetProperty("expires_in", out var dexp)) expiresInMs = dexp.GetInt64();
 
-        return (token, DateTimeOffset.UtcNow.AddMilliseconds(expiresInMs));
+        // expires_in 是相对毫秒数，起点取配置时区的现在，和落库口径一致。
+        return (token, _time.NowLocal.AddMilliseconds(expiresInMs));
     }
 
     public QoderAccountImporter.ImportResult ImportFromCockpitJson(string json, QoderRegion region)
     {
-        var parsed = QoderAccountImporter.Parse(json, region);
+        var parsed = QoderAccountImporter.Parse(json, region, _time);
         var entries = new List<QoderAccountImporter.EntryResult>();
         int added = 0, updated = 0, skipped = 0;
 
@@ -444,7 +451,7 @@ public class QoderAuthService
                 existing.Quota = acc.Quota;
                 existing.IsQuotaExceeded = acc.IsQuotaExceeded;
                 existing.Region = acc.Region;
-                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedAt = _time.NowLocal;
                 _db.UpsertAccount(existing);
                 updated++;
                 entries.Add(new(acc.UserId, acc.UserName, "更新", "已刷新该账号的凭证"));
@@ -473,7 +480,7 @@ public class QoderAuthService
             throw new InvalidOperationException($"账号 {acc.UserName ?? acc.Id} 缺少有效凭证。");
         }
 
-        if (acc.ExpiresAt.HasValue && acc.ExpiresAt.Value <= DateTimeOffset.UtcNow.AddMinutes(10))
+        if (acc.ExpiresAt.HasValue && acc.ExpiresAt.Value <= _time.NowLocal.AddMinutes(10))
         {
             if (acc.AuthMethod == "pat" && !string.IsNullOrEmpty(acc.PatToken))
             {
@@ -489,7 +496,7 @@ public class QoderAuthService
                     _log.LogWarning(ex, "PAT 续期失败，本次继续用旧凭证");
                 }
             }
-            else if (acc.ExpiresAt.Value <= DateTimeOffset.UtcNow)
+            else if (acc.ExpiresAt.Value <= _time.NowLocal)
             {
                 throw new InvalidOperationException(
                     $"账号 {acc.UserName ?? acc.Id} 的凭证已过期且无法自动续期，请在管理页重新登录。");
@@ -603,7 +610,7 @@ public class QoderAuthService
         acc.PlanName = !string.IsNullOrWhiteSpace(userTag) ? userTag : plan;
         acc.Quota = quota;
         acc.IsQuotaExceeded = exceeded;
-        acc.UpdatedAt = DateTime.UtcNow;
+        acc.UpdatedAt = _time.NowLocal;
 
         _db.UpsertAccount(acc);
         NotifyChange();

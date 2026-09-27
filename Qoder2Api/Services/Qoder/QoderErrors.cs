@@ -301,7 +301,7 @@ public static class QoderErrorClassifier
         return QoderErrorKind.None;
     }
 
-    public static DateTimeOffset? ParseRateReset(string? body)
+    public static DateTime? ParseRateReset(string? body)
     {
         if (string.IsNullOrWhiteSpace(body))
         {
@@ -335,12 +335,13 @@ public static class QoderErrorClassifier
         if (DateTime.TryParseExact(ts, formats, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dt))
         {
-            return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Local));
+            return dt;
         }
         if (DateTimeOffset.TryParse(ts, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dto))
         {
-            return dto;
+            // 带偏移的写法：折算成本地墙钟，和上面「上游文案就是东八区」的口径一致。
+            return System.TimeZoneInfo.ConvertTime(dto, System.TimeZoneInfo.Local).DateTime;
         }
         return null;
     }

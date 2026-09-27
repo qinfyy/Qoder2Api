@@ -35,19 +35,25 @@ public sealed class QoderPool
     private readonly Dictionary<string, PoolEntry> _entries = new(StringComparer.Ordinal);
     private readonly SqliteDbService _db;
     private readonly PoolOptions _opt;
+    private readonly Time _time;
     private readonly ILogger<QoderPool> _log;
 
     private long _pickSeq;
     private volatile bool _dirty;
 
-    public DateTimeOffset? LastFlushedAt { get; private set; }
+    public DateTime? LastFlushedAt { get; private set; }
 
     public PoolOptions Options => _opt;
 
-    public QoderPool(SqliteDbService db, IOptions<PoolOptions> options, ILogger<QoderPool> log)
+    public QoderPool(
+        SqliteDbService db,
+        IOptions<PoolOptions> options,
+        Time time,
+        ILogger<QoderPool> log)
     {
         _db = db;
         _opt = options.Value;
+        _time = time;
         _log = log;
         LoadFromDb();
     }
@@ -96,7 +102,7 @@ public sealed class QoderPool
                     var entry = new PoolEntry(acc);
                     if (states.TryGetValue(acc.Id, out var s))
                     {
-                        PoolStateStore.ApplyToEntry(entry, s, _log);
+                        PoolStateStore.ApplyToEntry(entry, s, _time, _log);
                     }
                     _entries[acc.Id] = entry;
                 }
@@ -112,7 +118,7 @@ public sealed class QoderPool
     {
         lock (_lock)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.NowLocal;
             SweepLeasesLocked(now);
             PruneLocked(now);
 
@@ -150,7 +156,7 @@ public sealed class QoderPool
         }
     }
 
-    private AccountLease OccupyLocked(PoolEntry e, DateTimeOffset now)
+    private AccountLease OccupyLocked(PoolEntry e, DateTime now)
     {
         e.InFlight++;
         e.LastUsedAt = now;
@@ -174,7 +180,7 @@ public sealed class QoderPool
         }
     }
 
-    private void SweepLeasesLocked(DateTimeOffset now)
+    private void SweepLeasesLocked(DateTime now)
     {
         foreach (var e in _entries.Values)
         {
@@ -187,7 +193,7 @@ public sealed class QoderPool
         }
     }
 
-    private void PruneLocked(DateTimeOffset now)
+    private void PruneLocked(DateTime now)
     {
         foreach (var e in _entries.Values)
         {
@@ -201,10 +207,10 @@ public sealed class QoderPool
         return limit > 0 && e.InFlight >= limit;
     }
 
-    private PoolEntry? PickEarliestExpiryLocked(DateTimeOffset now, string? model, IReadOnlySet<string>? tried)
+    private PoolEntry? PickEarliestExpiryLocked(DateTime now, string? model, IReadOnlySet<string>? tried)
     {
         PoolEntry? best = null;
-        DateTimeOffset bestExpiry = default;
+        DateTime bestExpiry = default;
         foreach (var (id, e) in _entries)
         {
             if (tried is not null && tried.Contains(id))
@@ -246,7 +252,7 @@ public sealed class QoderPool
         return best;
     }
 
-    private PoolEntry PickWeightedLocked(List<PoolEntry> candidates, DateTimeOffset now)
+    private PoolEntry PickWeightedLocked(List<PoolEntry> candidates, DateTime now)
     {
         double maxQuota = 0;
         foreach (var e in candidates)
@@ -272,7 +278,7 @@ public sealed class QoderPool
         var all = scored;
         var shortlist = scored.Count > _opt.ShortlistSize ? scored.GetRange(0, _opt.ShortlistSize) : scored;
 
-        var eligible = shortlist.Where(s => now - (s.Entry.LastUsedAt ?? DateTimeOffset.MinValue) >= MinPickGap).ToList();
+        var eligible = shortlist.Where(s => now - (s.Entry.LastUsedAt ?? DateTime.MinValue) >= MinPickGap).ToList();
         if (eligible.Count == 0)
         {
             var oldest = all[0].Entry;
@@ -289,7 +295,7 @@ public sealed class QoderPool
         return WeightedDraw(eligible);
     }
 
-    private double WeightOf(PoolEntry e, double maxQuota, DateTimeOffset now)
+    private double WeightOf(PoolEntry e, double maxQuota, DateTime now)
     {
         double w = 1.0;
 
@@ -376,7 +382,7 @@ public sealed class QoderPool
         {
             if (_entries.TryGetValue(accountId, out var e))
             {
-                e.NoteSuccess(DateTimeOffset.UtcNow);
+                e.NoteSuccess(_time.NowLocal);
                 _dirty = true;
             }
         }
@@ -396,7 +402,7 @@ public sealed class QoderPool
             {
                 return;
             }
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.NowLocal;
             if (kind.CountsAsAccountFailure())
             {
                 e.NoteError(now);
@@ -507,7 +513,7 @@ public sealed class QoderPool
         _ = critical;
     }
 
-    private void ApplySoftCooldownLocked(PoolEntry e, DateTimeOffset now, DateTimeOffset? resetAt, string reason)
+    private void ApplySoftCooldownLocked(PoolEntry e, DateTime now, DateTime? resetAt, string reason)
     {
         bool inSoftCooldown = e.CoolKind == CoolKind.Soft && e.CoolUntil is { } cu && now < cu;
         if (resetAt is { } ra)
@@ -525,7 +531,7 @@ public sealed class QoderPool
         e.ModelCooldowns.Clear(); // 账号级冷却清空模型豁免（切模型不该绕过账号级限流）
     }
 
-    private DateTimeOffset CapReset(DateTimeOffset now, DateTimeOffset resetAt)
+    private DateTime CapReset(DateTime now, DateTime resetAt)
     {
         var cap = now + _opt.SoftRateMax;
         if (resetAt > cap)
@@ -547,7 +553,7 @@ public sealed class QoderPool
         return d > _opt.SoftRateMax ? _opt.SoftRateMax : d;
     }
 
-    private void RecordBreakerFailureLocked(PoolEntry e, DateTimeOffset now)
+    private void RecordBreakerFailureLocked(PoolEntry e, DateTime now)
     {
         e.BreakerFails++;
         if (e.BreakerFails < _opt.BreakerThreshold)
@@ -570,13 +576,12 @@ public sealed class QoderPool
         e.CoolReason = "连续 5xx 熔断";
     }
 
-    private static DateTimeOffset NextDay4Am(DateTimeOffset now)
+    private static DateTime NextDay4Am(DateTime now)
     {
-        var local = now.LocalDateTime;
-        var target = local.Hour < 4
-            ? new DateTime(local.Year, local.Month, local.Day, 4, 0, 0)
-            : new DateTime(local.Year, local.Month, local.Day, 4, 0, 0).AddDays(1);
-        return new DateTimeOffset(target, TimeZoneInfo.Local.GetUtcOffset(target));
+        // now 已经是配置时区的裸时间，直接取日期部分即可。
+        return now.Hour < 4
+            ? new DateTime(now.Year, now.Month, now.Day, 4, 0, 0)
+            : new DateTime(now.Year, now.Month, now.Day, 4, 0, 0).AddDays(1);
     }
 
     public bool Revive(string accountId)
@@ -597,7 +602,7 @@ public sealed class QoderPool
     {
         lock (_lock)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.NowLocal;
             return _entries.Values.Any(e => e.IsHealthy(now, null) && !InFlightFullLocked(e));
         }
     }
@@ -606,7 +611,7 @@ public sealed class QoderPool
     {
         lock (_lock)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.NowLocal;
             var snap = new PoolSnapshot { Total = _entries.Count };
             foreach (var (id, e) in _entries.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             {
@@ -627,7 +632,7 @@ public sealed class QoderPool
         }
     }
 
-    private PoolAccountStatus StatusOfLocked(string id, PoolEntry e, DateTimeOffset now)
+    private PoolAccountStatus StatusOfLocked(string id, PoolEntry e, DateTime now)
     {
         var (state, reason, until) = e.Describe(now);
         long remaining = 0;
@@ -647,7 +652,7 @@ public sealed class QoderPool
             AdminDisabled = e.AdminDisabled,
             AutoDisabled = e.Disabled,
             RemainingSec = remaining,
-            UntilMs = until?.ToUnixTimeMilliseconds(),
+            Until = until,
             ConsecutiveFails = e.ConsecutiveFails,
             SuccessCount = e.SuccessCount,
             ErrTotal = e.ErrTotal,
@@ -661,7 +666,7 @@ public sealed class QoderPool
                 .OrderBy(m => m, StringComparer.Ordinal)
                 .ToList(),
             IsPreferred = e.Account.IsDefault,
-            LastUsedMs = e.LastUsedAt?.ToUnixTimeMilliseconds(),
+            LastUsed = e.LastUsedAt,
         };
     }
 
@@ -675,12 +680,12 @@ public sealed class QoderPool
         lock (_lock)
         {
             _dirty = false;
-            states = _entries.Select(kv => PoolStateStore.ToRecord(kv.Key, kv.Value)).ToList();
+            states = _entries.Select(kv => PoolStateStore.ToRecord(kv.Key, kv.Value, _time)).ToList();
         }
         try
         {
             _db.SavePoolStates(states);
-            LastFlushedAt = DateTimeOffset.UtcNow;
+            LastFlushedAt = _time.NowLocal;
         }
         catch (Exception ex)
         {

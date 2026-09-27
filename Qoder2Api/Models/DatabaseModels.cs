@@ -28,13 +28,13 @@ public class AccountRecord
     public string? DeviceToken { get; set; }
     public string? PatToken { get; set; }
     public string? RefreshToken { get; set; }
-    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
     public string Status { get; set; } = "active"; // active, disabled
     public double Quota { get; set; }
     public bool IsQuotaExceeded { get; set; }
     public bool IsDefault { get; set; } = false;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = default;
+    public DateTime UpdatedAt { get; set; } = default;
     public DateTime? LastUsedAt { get; set; }
 }
 
@@ -47,7 +47,7 @@ public class ApiKeyRecord
     public string KeyPrefix { get; set; } = "";
     public string? AccountId { get; set; }
     public string Status { get; set; } = "active"; // active, paused
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = default;
     public DateTime? LastUsedAt { get; set; }
 }
 
@@ -71,7 +71,7 @@ public class UsageRecord
     public int HttpStatus { get; set; } = 200;
     public string Status { get; set; } = "success";
     public string? ErrorMessage { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = default;
 }
 
 public class SettingItem

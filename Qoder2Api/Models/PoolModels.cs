@@ -58,9 +58,8 @@ public sealed class PoolAccountStatus
     [JsonPropertyName("remaining_sec")]
     public long RemainingSec { get; set; }
 
-    /// <summary>状态截止时刻（Unix 毫秒，null = 无时限）。</summary>
-    [JsonPropertyName("until_ms")]
-    public long? UntilMs { get; set; }
+    /// <summary>状态截止时刻（null = 无时限）。</summary>
+    public DateTime? Until { get; set; }
 
     /// <summary>连续失败计数（连败降权进度）。</summary>
     [JsonPropertyName("consecutive_fails")]
@@ -102,8 +101,7 @@ public sealed class PoolAccountStatus
     public bool IsPreferred { get; set; }
 
     /// <summary>最近一次被选中使用的时刻。</summary>
-    [JsonPropertyName("last_used_ms")]
-    public long? LastUsedMs { get; set; }
+    public DateTime? LastUsed { get; set; }
 }
 
 /// <summary>号池整体快照（供 UI 顶部徽章用）。</summary>

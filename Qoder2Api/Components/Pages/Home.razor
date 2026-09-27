@@ -208,7 +208,7 @@
                             }
                         </td>
                         <td style="font-size: 0.8rem; color: var(--muted);">
-                            @(acc.ExpiresAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "长期有效")
+                            @(acc.ExpiresAt?.ToString("yyyy-MM-dd HH:mm") ?? "长期有效")
                         </td>
 
                         <!-- 池状态：就绪 / 冷却 / 熔断 / 降权 / 需重登 / 已停用 -->

@@ -13,9 +13,9 @@ public enum CoolKind
 
 public sealed class ModelCooldown
 {
-    public DateTimeOffset Until { get; set; }
+    public DateTime Until { get; set; }
 
-    public DateTimeOffset ResetAt { get; set; }
+    public DateTime ResetAt { get; set; }
 
     public string Reason { get; set; } = "";
 }
@@ -35,7 +35,7 @@ public sealed class PoolEntry
     public bool NeedsRelogin { get; set; }
     public string? NeedsReloginReason { get; set; }
 
-    public DateTimeOffset? CoolUntil { get; set; }
+    public DateTime? CoolUntil { get; set; }
     public CoolKind CoolKind { get; set; }
     public string? CoolReason { get; set; }
 
@@ -43,35 +43,35 @@ public sealed class PoolEntry
 
     public Dictionary<string, ModelCooldown> ModelCooldowns { get; } = new(StringComparer.Ordinal);
 
-    public DateTimeOffset? BreakerUntil { get; set; }
+    public DateTime? BreakerUntil { get; set; }
     public int BreakerFails { get; set; }
 
     public int BreakerRetryCount { get; set; }
 
-    public DateTimeOffset? DegradeUntil { get; set; }
+    public DateTime? DegradeUntil { get; set; }
     public int ConsecutiveFails { get; set; }
 
     public int SessionDeadFails { get; set; }
 
     public long SuccessCount { get; set; }
     public long ErrTotal { get; set; }
-    public DateTimeOffset? LastSuccessAt { get; set; }
-    public DateTimeOffset? LastErrorAt { get; set; }
+    public DateTime? LastSuccessAt { get; set; }
+    public DateTime? LastErrorAt { get; set; }
     public double SuccessEma { get; set; } = 0.5;
 
-    public DateTimeOffset? LastUsedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
 
     public long UsedSeq { get; set; }
 
     public int InFlight { get; set; }
 
-    public DateTimeOffset? LeaseDeadline { get; set; }
+    public DateTime? LeaseDeadline { get; set; }
 
     public bool AdminDisabled => !string.Equals(Account.Status, "active", StringComparison.OrdinalIgnoreCase);
 
     public bool IsUnusable => AdminDisabled || Disabled || NeedsRelogin;
 
-    public bool IsHealthy(DateTimeOffset now, string? model)
+    public bool IsHealthy(DateTime now, string? model)
     {
         if (IsUnusable)
         {
@@ -96,15 +96,15 @@ public sealed class PoolEntry
         return true;
     }
 
-    public bool IsModelCooled(DateTimeOffset now, string model)
+    public bool IsModelCooled(DateTime now, string model)
     {
         return ModelCooldowns.TryGetValue(model, out var mc) && now < mc.Until;
     }
 
-    public DateTimeOffset? EarliestExpiry(DateTimeOffset now)
+    public DateTime? EarliestExpiry(DateTime now)
     {
-        DateTimeOffset? t = null;
-        void Consider(DateTimeOffset? v)
+        DateTime? t = null;
+        void Consider(DateTime? v)
         {
             if (v is { } x && now < x && (t is null || x < t))
             {
@@ -117,7 +117,7 @@ public sealed class PoolEntry
         return t;
     }
 
-    public (PoolAccountState State, string? Reason, DateTimeOffset? Until) Describe(DateTimeOffset now)
+    public (PoolAccountState State, string? Reason, DateTime? Until) Describe(DateTime now)
     {
         if (AdminDisabled || Disabled)
         {
@@ -170,7 +170,7 @@ public sealed class PoolEntry
         ModelCooldowns.Clear();
     }
 
-    public void PruneExpiredModelCooldowns(DateTimeOffset now)
+    public void PruneExpiredModelCooldowns(DateTime now)
     {
         if (ModelCooldowns.Count == 0)
         {
@@ -194,7 +194,7 @@ public sealed class PoolEntry
         }
     }
 
-    public void NoteSuccess(DateTimeOffset now)
+    public void NoteSuccess(DateTime now)
     {
         SuccessCount++;
         LastSuccessAt = now;
@@ -209,7 +209,7 @@ public sealed class PoolEntry
         DegradeUntil = null;
     }
 
-    public void NoteError(DateTimeOffset now)
+    public void NoteError(DateTime now)
     {
         ErrTotal++;
         LastErrorAt = now;

@@ -6,11 +6,9 @@ namespace Qoder2Api.Services.Qoder;
 
 public sealed class ModelCooldownRecord
 {
-    [JsonPropertyName("until_ms")]
-    public long UntilMs { get; set; }
+    public DateTime? Until { get; set; }
 
-    [JsonPropertyName("reset_at_ms")]
-    public long ResetAtMs { get; set; }
+    public DateTime? ResetAt { get; set; }
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
@@ -26,15 +24,15 @@ public sealed class PoolStateRecord
     public bool NeedsRelogin { get; set; }
     public string? NeedsReloginReason { get; set; }
 
-    public long? CoolUntilMs { get; set; }
+    public DateTime? CoolUntil { get; set; }
     public int CoolKind { get; set; }
     public string? CoolReason { get; set; }
 
-    public long? BreakerUntilMs { get; set; }
+    public DateTime? BreakerUntil { get; set; }
     public int BreakerFails { get; set; }
     public int BreakerRetryCount { get; set; }
 
-    public long? DegradeUntilMs { get; set; }
+    public DateTime? DegradeUntil { get; set; }
     public int ConsecutiveFails { get; set; }
     public int SoftStreak { get; set; }
     public int SessionDeadFails { get; set; }
@@ -43,11 +41,11 @@ public sealed class PoolStateRecord
     public long ErrTotal { get; set; }
     public double SuccessEma { get; set; } = 0.5;
 
-    public long? LastSuccessMs { get; set; }
-    public long? LastErrMs { get; set; }
+    public DateTime? LastSuccessAt { get; set; }
+    public DateTime? LastErrorAt { get; set; }
 
     public string? ModelCooldownsJson { get; set; }
-    public long UpdatedAtMs { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
 
 public static class PoolStateStore
@@ -57,9 +55,9 @@ public static class PoolStateStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public static PoolStateRecord ToRecord(string accountId, PoolEntry e)
+    public static PoolStateRecord ToRecord(string accountId, PoolEntry e, Time time)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = time.NowLocal;
 
         // 只保留未过期的模型级冷却（过期的写进去也是噪音，恢复时还得再滤一遍）。
         Dictionary<string, ModelCooldownRecord>? models = null;
@@ -72,8 +70,8 @@ public static class PoolStateStore
             models ??= new Dictionary<string, ModelCooldownRecord>(StringComparer.Ordinal);
             models[model] = new ModelCooldownRecord
             {
-                UntilMs = mc.Until.ToUnixTimeMilliseconds(),
-                ResetAtMs = mc.ResetAt == default ? 0 : mc.ResetAt.ToUnixTimeMilliseconds(),
+                Until = mc.Until,
+                ResetAt = mc.ResetAt == default ? null : mc.ResetAt,
                 Reason = mc.Reason,
             };
         }
@@ -86,44 +84,44 @@ public static class PoolStateStore
             NeedsRelogin = e.NeedsRelogin,
             NeedsReloginReason = e.NeedsReloginReason,
             // 已过期的截止时间不写（惰性过滤），避免重启后凭空复活一段冷却。
-            CoolUntilMs = Live(e.CoolUntil, now),
+            CoolUntil = Live(e.CoolUntil, now),
             CoolKind = (int)e.CoolKind,
             CoolReason = e.CoolReason,
-            BreakerUntilMs = Live(e.BreakerUntil, now),
+            BreakerUntil = Live(e.BreakerUntil, now),
             BreakerFails = e.BreakerFails,
             BreakerRetryCount = e.BreakerRetryCount,
-            DegradeUntilMs = Live(e.DegradeUntil, now),
+            DegradeUntil = Live(e.DegradeUntil, now),
             ConsecutiveFails = e.ConsecutiveFails,
             SoftStreak = e.SoftStreak,
             SessionDeadFails = e.SessionDeadFails,
             SuccessCount = e.SuccessCount,
             ErrTotal = e.ErrTotal,
             SuccessEma = e.SuccessEma,
-            LastSuccessMs = e.LastSuccessAt?.ToUnixTimeMilliseconds(),
-            LastErrMs = e.LastErrorAt?.ToUnixTimeMilliseconds(),
+            LastSuccessAt = e.LastSuccessAt,
+            LastErrorAt = e.LastErrorAt,
             ModelCooldownsJson = models is null ? null : JsonSerializer.Serialize(models, JsonOpts),
-            UpdatedAtMs = now.ToUnixTimeMilliseconds(),
+            UpdatedAt = now,
         };
     }
 
-    public static void ApplyToEntry(PoolEntry e, PoolStateRecord s, ILogger? log = null)
+    public static void ApplyToEntry(PoolEntry e, PoolStateRecord s, Time time, ILogger? log = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = time.NowLocal;
         e.Disabled = s.Disabled;
         e.DisabledReason = s.DisabledReason;
         e.NeedsRelogin = s.NeedsRelogin;
         e.NeedsReloginReason = s.NeedsReloginReason;
 
-        e.CoolUntil = Revive(s.CoolUntilMs, now);
+        e.CoolUntil = Live(s.CoolUntil, now);
         e.CoolKind = (CoolKind)s.CoolKind;
         e.CoolReason = e.CoolUntil is null ? null : s.CoolReason;
 
-        e.BreakerUntil = Revive(s.BreakerUntilMs, now);
+        e.BreakerUntil = Live(s.BreakerUntil, now);
         e.BreakerFails = s.BreakerFails;
         // 熔断已过期 → 退避指数归零（否则"越熔越长"会永久累积）。
         e.BreakerRetryCount = e.BreakerUntil is null ? 0 : s.BreakerRetryCount;
 
-        e.DegradeUntil = Revive(s.DegradeUntilMs, now);
+        e.DegradeUntil = Live(s.DegradeUntil, now);
         e.ConsecutiveFails = s.ConsecutiveFails;
         e.SoftStreak = s.SoftStreak;
         e.SessionDeadFails = s.SessionDeadFails;
@@ -132,8 +130,8 @@ public static class PoolStateStore
         e.ErrTotal = s.ErrTotal;
         e.SuccessEma = s.SuccessEma is >= 0 and <= 1 ? s.SuccessEma : 0.5;
 
-        e.LastSuccessAt = FromMs(s.LastSuccessMs);
-        e.LastErrorAt = FromMs(s.LastErrMs);
+        e.LastSuccessAt = s.LastSuccessAt;
+        e.LastErrorAt = s.LastErrorAt;
 
         if (!string.IsNullOrWhiteSpace(s.ModelCooldownsJson))
         {
@@ -144,7 +142,7 @@ public static class PoolStateStore
                 {
                     foreach (var (model, mc) in models)
                     {
-                        var until = FromMs(mc.UntilMs);
+                        var until = mc.Until;
                         if (until is null || until <= now)
                         {
                             continue; // 已过期：不恢复
@@ -152,7 +150,7 @@ public static class PoolStateStore
                         e.ModelCooldowns[model] = new ModelCooldown
                         {
                             Until = until.Value,
-                            ResetAt = FromMs(mc.ResetAtMs) ?? default,
+                            ResetAt = mc.ResetAt ?? default,
                             Reason = mc.Reason,
                         };
                     }
@@ -165,19 +163,6 @@ public static class PoolStateStore
         }
     }
 
-    private static long? Live(DateTimeOffset? v, DateTimeOffset now) =>
-        v is { } x && x > now ? x.ToUnixTimeMilliseconds() : null;
-
-    private static DateTimeOffset? Revive(long? ms, DateTimeOffset now)
-    {
-        if (ms is not { } v)
-        {
-            return null;
-        }
-        var t = DateTimeOffset.FromUnixTimeMilliseconds(v);
-        return t > now ? t : null;
-    }
-
-    private static DateTimeOffset? FromMs(long? ms) =>
-        ms is { } v && v > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(v) : null;
+    private static DateTime? Live(DateTime? v, DateTime now) =>
+        v is { } x && x > now ? x : null;
 }

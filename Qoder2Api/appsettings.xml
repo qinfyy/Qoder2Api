@@ -85,4 +85,8 @@
     <ModelCatalog>00:02:00</ModelCatalog>
   </Refresh>
 
+  <Time>
+    <TimeZone>China Standard Time</TimeZone>
+  </Time>
+
 </configuration>
