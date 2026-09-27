@@ -87,7 +87,7 @@
         </div>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-scroll">
         <table>
             <thead>
                 <tr>
@@ -120,7 +120,7 @@
                         </td>
                     </tr>
                 }
-                @foreach (var acc in accounts)
+                @foreach (var acc in PagedAccounts)
                 {
                     var ps = PoolStatusOf(acc.Id);
                     <tr>
@@ -316,6 +316,12 @@
             </tbody>
         </table>
     </div>
+
+    <TablePager Total="@accounts.Count"
+                Page="@accPage"
+                PageSize="@accPageSize"
+                PageChanged="OnAccPageChanged"
+                PageSizeChanged="OnAccPageSizeChanged" />
 </section>
 
 <!-- Qoder 运营活动弹窗：所有账号的活动集中在一处，表格里只留一个入口按钮 -->
@@ -607,6 +613,28 @@
 
 @code {
     private List<AccountRecord> accounts = [];
+
+    private const int DefaultAccPageSize = 10;
+    private int accPage = 1;
+    private int accPageSize = DefaultAccPageSize;
+
+    private List<AccountRecord> PagedAccounts
+    {
+        get
+        {
+            int totalPages = Math.Max(1, (int)Math.Ceiling(accounts.Count / (double)accPageSize));
+            int page = Math.Clamp(accPage, 1, totalPages);
+            return accounts.Skip((page - 1) * accPageSize).Take(accPageSize).ToList();
+        }
+    }
+
+    private void OnAccPageChanged(int page) => accPage = page;
+
+    private void OnAccPageSizeChanged(int size)
+    {
+        accPageSize = size;
+        accPage = 1;
+    }
     private string? flashMessage;
     private bool flashIsError = false;
 

@@ -3,6 +3,7 @@
 @using Qoder2Api.Components
 @using Qoder2Api.Components.Layout
 @using Qoder2Api.Models
+@using Qoder2Api.Services.Database
 @using Qoder2Api.Services.Qoder
 @inject QoderAuthService AuthService
 @implements IDisposable
@@ -35,55 +36,49 @@
 <div class="card-grid">
     <div class="metric-box">
         <div class="metric-label">总请求次数</div>
-        <div class="metric-value">@records.Count</div>
+        <div class="metric-value">@summary.Count</div>
         <div class="metric-sub">本地 SQLite 审计记录</div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">累计消耗 Tokens</div>
-        <div class="metric-value">@records.Sum(r => (long)r.TotalTokens).ToString("N0")</div>
+        <div class="metric-value">@summary.TotalTokens.ToString("N0")</div>
         <div class="metric-sub">提示词 + 补全结果</div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">深度思考推理 Tokens</div>
-        <div class="metric-value">@records.Sum(r => (long)r.ReasoningTokens).ToString("N0")</div>
+        <div class="metric-value">@summary.ReasoningTokens.ToString("N0")</div>
         <div class="metric-sub">思维链生成量</div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">提示缓存命中</div>
         <div class="metric-value" style="color: var(--ok);">
-            @(records.Sum(r => (long)r.CachedTokens).ToString("N0"))
+            @summary.CachedTokens.ToString("N0")
         </div>
         <div class="metric-sub">
-            @{
-                long totalPrompt = records.Sum(r => (long)r.PromptTokens);
-                long totalCached = records.Sum(r => (long)r.CachedTokens);
-            }
-            @(totalPrompt > 0 ? $"占输入 {totalCached * 100.0 / totalPrompt:F0}%" : "暂无数据")
+            @(summary.PromptTokens > 0
+                ? $"占输入 {summary.CachedTokens * 100.0 / summary.PromptTokens:F0}%"
+                : "暂无数据")
         </div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">平均首字延迟</div>
         <div class="metric-value">
-            @{
-                var ttft = records.Where(r => r.FirstTokenMs > 0).Select(r => (double)r.FirstTokenMs).ToList();
-                var ttftStream = records.Count(r => r.FirstTokenMs > 0 && r.IsStream == true);
-            }
-            @(ttft.Count > 0 ? $"{ttft.Average():F0} ms" : "—")
+            @(summary.FirstTokenSamples > 0 ? $"{summary.AvgFirstTokenMs:F0} ms" : "—")
         </div>
         <div class="metric-sub"
-             title="从请求进入到首个内容 token 到达的实测耗时，含排队等待与换号重试。&#10;统计口径：@ttft.Count / @records.Count 条记录有值，其中流式 @ttftStream 条。&#10;非流式请求的客户端要等全部聚合完才收到内容，其值量的是「上游何时开始产出」。">
-            实测 · 含排队 @ttft.Count 条
+             title="从请求进入到首个内容 token 到达的实测耗时，含排队等待与换号重试。&#10;统计口径：@summary.FirstTokenSamples / @summary.Count 条记录有值，其中流式 @summary.FirstTokenStreamSamples 条。&#10;非流式请求的客户端要等全部聚合完才收到内容，其值量的是「上游何时开始产出」。">
+            实测 · 含排队 @summary.FirstTokenSamples 条
         </div>
     </div>
 
     <div class="metric-box">
         <div class="metric-label">平均响应延迟</div>
         <div class="metric-value">
-            @(records.Count > 0 ? $"{(records.Average(r => r.LatencyMs)):F0} ms" : "0 ms")
+            @(summary.Count > 0 ? $"{summary.AvgLatencyMs:F0} ms" : "0 ms")
         </div>
         <div class="metric-sub">包含首字与全文本传输</div>
     </div>
@@ -104,7 +99,7 @@
         </div>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-scroll">
         <table>
             <thead>
                 <tr>
@@ -134,7 +129,7 @@
                 {
                     <tr>
                         <td style="font-size: 0.8rem; color: var(--muted);" class="mono">
-                            @r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                            @r.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
                         </td>
                         <td>
                             <code class="mono" style="font-weight: 600; color: var(--ink);">@r.Model</code>
@@ -184,10 +179,21 @@
             </tbody>
         </table>
     </div>
+
+    <TablePager Total="@totalRecords"
+                Page="@pageNo"
+                PageSize="@pageSize"
+                PageChanged="OnPageChanged"
+                PageSizeChanged="OnPageSizeChanged" />
 </section>
 
 @code {
     private List<UsageRecord> records = [];
+    private UsageSummary summary = new();
+    private int totalRecords;
+    // 不能叫 page —— @page 是 Razor 的路由保留指令。
+    private int pageNo = 1;
+    private int pageSize = 20;
     private string? flashMessage;
     private bool flashIsError = false;
 
@@ -198,10 +204,38 @@
 
     private void ReloadData()
     {
-        records = AuthService.Database.GetRecentUsage(100);
+        ReloadPage();
+        // 统计卡片走全量汇总，不能只看当前页——否则翻页时数字会跳。
+        summary = AuthService.Database.GetUsageSummary();
         // 用量记录只存账号 Id，展示名要另查一次（每页一次，不是每请求一次）。
         _supplierById = AuthService.Database.GetAllAccounts()
             .ToDictionary(a => a.Id, BuildSupplier, StringComparer.Ordinal);
+    }
+
+    private void ReloadPage()
+    {
+        records = AuthService.Database.GetUsagePage(pageNo, pageSize, out totalRecords);
+
+        // 清空日志后当前页可能越界，回到最后一页。
+        int totalPages = Math.Max(1, (int)Math.Ceiling(totalRecords / (double)pageSize));
+        if (pageNo > totalPages)
+        {
+            pageNo = totalPages;
+            records = AuthService.Database.GetUsagePage(pageNo, pageSize, out totalRecords);
+        }
+    }
+
+    private void OnPageChanged(int p)
+    {
+        pageNo = p;
+        ReloadPage();
+    }
+
+    private void OnPageSizeChanged(int size)
+    {
+        pageSize = size;
+        pageNo = 1;
+        ReloadPage();
     }
 
     private Dictionary<string, Supplier> _supplierById = new(StringComparer.Ordinal);

@@ -309,6 +309,116 @@ th {
     text-transform: uppercase;
 }
 
+/* 行数不定的表格（账户列表 / 调用明细）用这个：纵向独立滚动 + 表头吸顶。
+   max-height 给一个上限，行数少时表格按内容收缩，不会留大片空白。 */
+.table-scroll {
+    max-height: min(62vh, 46rem);
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+    /* 横向也滚，但纵向滚动条常驻，不随内容出现/消失而横向抖动 */
+    scrollbar-gutter: stable;
+}
+
+.table-scroll thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    /* 吸顶时表头下方的行会从下面滑过，需要不透明底色 + 一点分隔阴影 */
+    box-shadow: inset 0 -1px 0 var(--line);
+}
+
+/* 分页控件 */
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    padding: 0.7rem 0.15rem 0;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.pager-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.pager-info b {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.pager-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    /* 全局 label 是 flex-direction: column（表单字段要竖排），
+       这里要横排必须显式覆盖，否则「每页」和下拉框会叠成两行。 */
+    flex-direction: row;
+    width: auto;
+}
+
+.pager-size select {
+    padding: 0.2rem 0.35rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-family: inherit;
+}
+
+.pager-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.pager-nav button {
+    min-width: 1.9rem;
+    padding: 0.25rem 0.45rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-family: inherit;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.pager-nav button:hover:not(:disabled) {
+    background: var(--card-subtle);
+}
+
+.pager-nav button.on:hover:not(:disabled) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.pager-nav button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.pager-nav button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.pager-nav .gap {
+    padding: 0 0.15rem;
+    color: var(--muted);
+}
+
 tbody tr:last-child td {
     border-bottom: none;
 }

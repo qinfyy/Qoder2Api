@@ -6,6 +6,22 @@ using Qoder2Api.Services.Qoder;
 
 namespace Qoder2Api.Services.Database;
 
+/// <summary>全量用量汇总，供页面顶部的统计卡片使用。</summary>
+public sealed class UsageSummary
+{
+    public int Count { get; set; }
+    public long PromptTokens { get; set; }
+    public long CompletionTokens { get; set; }
+    public long TotalTokens { get; set; }
+    public long ReasoningTokens { get; set; }
+    public long CachedTokens { get; set; }
+    public double Credits { get; set; }
+    public double AvgLatencyMs { get; set; }
+    public double AvgFirstTokenMs { get; set; }
+    public int FirstTokenSamples { get; set; }
+    public int FirstTokenStreamSamples { get; set; }
+}
+
 public class SqliteDbService
 {
     private readonly IDbContextFactory<AppDbContext> _factory;
@@ -259,6 +275,75 @@ public class SqliteDbService
             .OrderByDescending(u => u.CreatedAt)
             .Take(limit)
             .ToList();
+    }
+
+    /// <summary>分页取调用记录。倒序（最新在前），页码从 1 开始。</summary>
+    public List<UsageRecord> GetUsagePage(int page, int pageSize, out int total)
+    {
+        using var db = _factory.CreateDbContext();
+        total = db.UsageRecords.Count();
+        if (total == 0 || pageSize <= 0)
+        {
+            return [];
+        }
+
+        return db.UsageRecords
+            .AsNoTracking()
+            .OrderByDescending(u => u.CreatedAt)
+            .Skip((Math.Max(page, 1) - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 全量用量汇总。统计卡片要覆盖所有记录（不只是当前页）。
+    /// 折减成 8 列再在内存里聚合：EF 翻不了「先 Where 再 Average」这种嵌套聚合。
+    /// </summary>
+    public UsageSummary GetUsageSummary()
+    {
+        using var db = _factory.CreateDbContext();
+
+        // 延迟到真有数据再查：空表时 EF 不会生成聚合查询，省一次往返。
+        List<UsageRecord> rows = db.UsageRecords
+            .AsNoTracking()
+            .Select(u => new UsageRecord
+            {
+                PromptTokens = u.PromptTokens,
+                CompletionTokens = u.CompletionTokens,
+                TotalTokens = u.TotalTokens,
+                ReasoningTokens = u.ReasoningTokens,
+                CachedTokens = u.CachedTokens,
+                Credits = u.Credits,
+                LatencyMs = u.LatencyMs,
+                FirstTokenMs = u.FirstTokenMs,
+                IsStream = u.IsStream,
+            })
+            .ToList();
+
+        if (rows.Count == 0)
+        {
+            return new UsageSummary();
+        }
+
+        // 只 Select 需要的 8 列，且过滤掉不参与平均的样本在内存里做——
+        // EF 翻不了「先 Where 再 Average」这种嵌套聚合。
+        var latencies = rows.Where(u => u.LatencyMs > 0).Select(u => (double)u.LatencyMs).ToList();
+        var ttfts = rows.Where(u => u.FirstTokenMs > 0).Select(u => (double)u.FirstTokenMs).ToList();
+
+        return new UsageSummary
+        {
+            Count = rows.Count,
+            PromptTokens = rows.Sum(u => (long)u.PromptTokens),
+            CompletionTokens = rows.Sum(u => (long)u.CompletionTokens),
+            TotalTokens = rows.Sum(u => (long)u.TotalTokens),
+            ReasoningTokens = rows.Sum(u => (long)u.ReasoningTokens),
+            CachedTokens = rows.Sum(u => (long)u.CachedTokens),
+            Credits = rows.Sum(u => u.Credits),
+            AvgLatencyMs = latencies.Count > 0 ? latencies.Average() : 0,
+            AvgFirstTokenMs = ttfts.Count > 0 ? ttfts.Average() : 0,
+            FirstTokenSamples = ttfts.Count,
+            FirstTokenStreamSamples = rows.Count(u => u.FirstTokenMs > 0 && u.IsStream == true),
+        };
     }
 
     public void ClearUsageRecords()
