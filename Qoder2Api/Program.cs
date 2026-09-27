@@ -95,8 +95,6 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 
 app.MapChatEndpoint();
-app.MapQoderApiRoutes();
-app.MapAdminApiRoutes();
 
 // Map Blazor UI with interactive server mode
 app.MapRazorComponents<App>()

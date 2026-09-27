@@ -27,6 +27,19 @@ public static class ChatEndpoint
     public static void MapChatEndpoint(this IEndpointRouteBuilder app)
     {
         app.MapPost("/v1/chat/completions", HandleAsync);
+        app.MapGet("/v1/models", (QoderAuthService auth, HttpContext context) =>
+        {
+            if (!ResolveKey(auth, context).Ok)
+            {
+                return OpenAiErrors.Unauthorized("API Key 无效或缺失。");
+            }
+
+            var resp = new ModelListResponse
+            {
+                Data = QoderConstants.DefaultModels.Select(m => new ModelItem { Id = m }).ToList()
+            };
+            return Results.Ok(resp);
+        });
     }
 
     private static async Task<IResult> HandleAsync(

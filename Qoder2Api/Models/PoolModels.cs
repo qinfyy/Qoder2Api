@@ -106,7 +106,7 @@ public sealed class PoolAccountStatus
     public long? LastUsedMs { get; set; }
 }
 
-/// <summary>号池整体快照（供 UI 顶部徽章与 /api/pool/status 用）。</summary>
+/// <summary>号池整体快照（供 UI 顶部徽章用）。</summary>
 public sealed class PoolSnapshot
 {
     [JsonPropertyName("total")]

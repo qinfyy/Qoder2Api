@@ -94,7 +94,7 @@ public static class QoderConstants
 
         /// <summary>
         /// 上游下发的计费倍率（/api/v2/model/list 的 price_factor）。
-        /// 1 = 标准，&lt;1 = 更便宜。由 /api/models/sync 写入，models.xml 里可手改。
+        /// 1 = 标准，&lt;1 = 更便宜。由 ModelCatalogRefresher 从上游同步写入，models.xml 里可手改。
         /// </summary>
         [JsonPropertyName("price_factor")]
         public double? PriceFactor { get; set; }
@@ -344,7 +344,7 @@ public static class QoderConstants
                     m.Aliases.Count > 0
                         ? new XElement("aliases", m.Aliases.Select(a => new XElement("alias", a)))
                         : null,
-                    // 动态信息（由 /api/models/sync 从上游写入），无值时不写元素
+                    // 动态信息（由 ModelCatalogRefresher 从上游写入），无值时不写元素
                     m.PriceFactor is { } pf ? new XElement("priceFactor",
                         pf.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
                     m.IsFree is { } free ? new XElement("isFree", free ? "true" : "false") : null,

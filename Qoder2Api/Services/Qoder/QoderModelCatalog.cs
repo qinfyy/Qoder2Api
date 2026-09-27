@@ -99,7 +99,7 @@ public sealed class QoderModelCatalog
         _log = log;
     }
 
-    /// <summary>上次成功抓取的快照（供 UI 与 /api/models 展示）。</summary>
+    /// <summary>上次成功抓取的快照（供 UI 展示）。</summary>
     public ModelCatalogSnapshot Last
     {
         get
