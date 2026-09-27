@@ -328,7 +328,8 @@ tbody tr:hover {
     font-weight: 600;
     border: 1px solid var(--line);
     line-height: 1.3;
-    white-space: nowrap; /* 「就绪」「● 当前活跃」必须整块显示，不能被挤断 */
+    color: var(--ink);
+    white-space: nowrap;
 }
 
 .badge.active {

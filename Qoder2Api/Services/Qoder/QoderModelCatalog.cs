@@ -71,20 +71,6 @@ public sealed class ModelCatalogSnapshot
     public List<ModelCatalogEntry> Models { get; set; } = [];
 }
 
-/// <summary>
-/// 上游模型目录（/api/v2/model/list）。
-///
-/// 逆向自客户端 SDK 的 <c>listModelsFromRemote</c>：
-/// <code>
-/// GET /api/v2/model/list?Encode=1     （另有 outerProviders 变体，本代理用不到）
-/// endpointType: infer  → 走与普通推理相同的 COSY 签名
-/// </code>
-/// 客户端以 **2 分钟**（常量 eec = 12e4）为周期同步；本服务周期可配，默认对齐。
-///
-/// 用途：拿到 models.xml 里没有的实时信息——计费倍率（price_factor）、
-/// 是否限时免费、以及"低峰折扣进行中"（promotion）。有了倍率就能在选号时
-/// 优先挑便宜的模型，或在前端提示当前处于折扣时段。
-/// </summary>
 public sealed class QoderModelCatalog
 {
     private readonly IHttpClientFactory _httpFactory;
@@ -306,22 +292,6 @@ public sealed class QoderModelCatalog
             if (v.ValueKind is JsonValueKind.True or JsonValueKind.False)
             {
                 return v.GetBoolean();
-            }
-        }
-        return null;
-    }
-
-    private static long? FirstLong(JsonElement e, params string[] names)
-    {
-        foreach (var n in names)
-        {
-            if (!e.TryGetProperty(n, out var v))
-            {
-                continue;
-            }
-            if (v.ValueKind == JsonValueKind.Number)
-            {
-                return v.TryGetInt64(out var l) ? l : (long)v.GetDouble();
             }
         }
         return null;
